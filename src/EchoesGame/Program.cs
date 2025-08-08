@@ -24,6 +24,7 @@ internal static class Program
         var xpSystem = new Game.XPSystem();
         var xpOrbs = new Game.XPOrbPool(capacity: 512);
         var draft = new Game.LevelUpDraft();
+        var pacts = new Game.PactOverlay();
         bool draftOpen = false;
         var camera = new Camera2D
         {
@@ -39,13 +40,14 @@ internal static class Program
         EchoesGame.Infra.Analytics.Init();
         EchoesGame.Infra.Analytics.Log("start_run", new System.Collections.Generic.Dictionary<string, object>());
         int lastPending = 0;
+        float nextPactAt = 30f;
 
         while (!Raylib.WindowShouldClose())
         {
             float dt = Raylib.GetFrameTime();
 
             if (Raylib.IsKeyPressed(KeyboardKey.P)) paused = !paused;
-            if (paused || draftOpen || gameOver)
+            if (paused || draftOpen || gameOver || pacts.Opened)
             {
                 // Draw only
                 Raylib.BeginDrawing();
@@ -71,6 +73,17 @@ internal static class Program
                     {
                         int i = draft.HitTest(Raylib.GetMousePosition());
                         if (i >= 0) { draft.Apply(i, player); xpSystem.ConsumePending(); draftOpen = false; }
+                    }
+                }
+                if (pacts.Opened)
+                {
+                    pacts.Draw();
+                    if (Raylib.IsKeyPressed(KeyboardKey.One)) { pacts.Apply(0, ref player, enemySpawner); }
+                    else if (Raylib.IsKeyPressed(KeyboardKey.Two)) { pacts.Apply(1, ref player, enemySpawner); }
+                    else if (Raylib.IsMouseButtonPressed(MouseButton.Left))
+                    {
+                        int i = pacts.HitTest(Raylib.GetMousePosition());
+                        if (i >= 0) pacts.Apply(i, ref player, enemySpawner);
                     }
                 }
                 if (gameOver)
@@ -113,6 +126,11 @@ internal static class Program
             {
                 draft.Open();
                 draftOpen = true;
+            }
+            if (!pacts.Opened && elapsed >= nextPactAt)
+            {
+                pacts.Open();
+                nextPactAt += 45f;
             }
 
             // Draw
@@ -381,6 +399,13 @@ namespace EchoesGame.Game
             HP = MathF.Min(MaxHP, HP + MaxHP * p);
         }
 
+        public void IncreaseMaxHPByPercent(float percent, bool healToFull)
+        {
+            float mult = 1f + percent;
+            MaxHP *= mult;
+            if (healToFull) HP = MaxHP; else HP = MathF.Min(MaxHP, HP);
+        }
+
         private bool isDashing;
         private float dashTimer;
         private float dashCooldownTimer;
@@ -622,6 +647,10 @@ namespace EchoesGame.Game
             Vector2 dir = target - Position;
             if (dir.LengthSquared() > 1e-5f)
             {
+                faceAngleDeg = MathF.Atan2(dir.Y, dir.X) * (180f / MathF.PI);
+            }
+            if (dir.LengthSquared() > 1e-5f)
+            {
                 dir = Vector2.Normalize(dir);
                 Position += dir * Speed * dt;
             }
@@ -635,10 +664,16 @@ namespace EchoesGame.Game
             if (Assets.TryGet(texName, out var tex))
             {
                 var src = new Rectangle(0, 0, tex.Width, tex.Height);
-                var dst = new Rectangle(Position.X, Position.Y, tex.Width, tex.Height);
+                float scale = IsElite ? 1.25f : 1f;
+                var dst = new Rectangle(Position.X, Position.Y, tex.Width * scale, tex.Height * scale);
                 var origin = new Vector2(tex.Width / 2f, tex.Height / 2f);
-                var tint = hitFlash > 0f ? Color.Orange : (IsSprinter ? Color.SkyBlue : Color.White);
+                var tint = hitFlash > 0f ? Color.Orange : (Modifier == EnemyMod.Berserk ? Color.Red : (IsSprinter ? Color.SkyBlue : Color.White));
                 Raylib.DrawTexturePro(tex, src, dst, origin, faceAngleDeg, tint);
+                if (IsElite && Modifier == EnemyMod.Shielded)
+                {
+                    float ringR = MathF.Max(dst.Width, dst.Height) / 2f + 6f;
+                    Raylib.DrawCircleLines((int)Position.X, (int)Position.Y, ringR, Color.RayWhite);
+                }
                 // HP bar
                 float w = 32f; float h = 4f;
                 float n = MathF.Max(0f, HP) / MathF.Max(1f, MaxHP);
@@ -853,6 +888,62 @@ namespace EchoesGame.Game
         }
     }
 
+    // Pact overlay (altar: buff + debuff)
+    internal sealed class PactOverlay
+    {
+        private Rectangle[] rects = Array.Empty<Rectangle>();
+        private string[] titles = new[] { "Storm Pact: +20% fire rate, +15% enemy speed", "Stone Pact: +20% HP, -15% move speed" };
+        public bool Opened { get; private set; }
+
+        public void Open()
+        {
+            Opened = true;
+            int x = 220; int y = 160; int w = 320; int h = 120; int gap = 32;
+            rects = new[] { new Rectangle(x, y, w, h), new Rectangle(x + w + gap, y, w, h) };
+        }
+
+        public void Draw()
+        {
+            Raylib.DrawRectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight(), new Color(0,0,0,160));
+            for (int i = 0; i < rects.Length; i++)
+            {
+                var r = rects[i];
+                bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+                Raylib.DrawRectangleRec(r, hover ? new Color(120,120,120,255) : Color.DarkGray);
+                Raylib.DrawRectangleLinesEx(r, 2, hover ? Color.Gold : Color.Black);
+                Raylib.DrawText($"{i+1}. {titles[i]}", (int)r.X + 10, (int)r.Y + 12, 20, Color.RayWhite);
+            }
+        }
+
+        public int HitTest(Vector2 mouse)
+        {
+            for (int i = 0; i < rects.Length; i++) if (Raylib.CheckCollisionPointRec(mouse, rects[i])) return i; return -1;
+        }
+
+        public void Apply(int idx, ref Player player, EnemySpawner spawner)
+        {
+            if (idx == 0)
+            {
+                player.ApplyMod(Player.ModType.ShootInterval);
+                // enemies faster
+                ModifyEnemies(spawner, speedMul: 1.15f);
+            }
+            else if (idx == 1)
+            {
+                player.IncreaseMaxHPByPercent(0.20f, healToFull: true);
+                player.ApplyMod(Player.ModType.MoveSpeed); // then nerf move by 15%
+                player.PlayerSpeedMultiplier *= 0.85f;
+            }
+            Opened = false;
+        }
+
+        private void ModifyEnemies(EnemySpawner spawner, float speedMul = 1f)
+        {
+            var list = (List<Enemy>)typeof(EnemySpawner).GetField("enemies", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(spawner)!;
+            foreach (var e in list) e.Speed *= speedMul;
+        }
+    }
+
     internal sealed class EnemySpawner
     {
         private readonly List<Enemy> enemies = new();
@@ -860,6 +951,7 @@ namespace EchoesGame.Game
         private float interval = 1.2f;
         private int maxAlive = 40;
         private float threat; // grows with time
+        private int batchSize = 1;
 
         public IReadOnlyList<Enemy> Enemies => enemies;
         public int Count => enemies.Count;
@@ -871,11 +963,15 @@ namespace EchoesGame.Game
             // escalation
             interval = MathF.Max(0.4f, 1.2f - threat * 0.01f);
             maxAlive = 30 + (int)MathF.Min(70, threat * 0.8f);
+            batchSize = (threat > 30f) ? 2 : 1;
+            if (threat > 60f) batchSize = 3;
+            if (threat > 90f) batchSize = 4;
 
             if (timer >= interval && enemies.Count < maxAlive)
             {
                 timer = 0f;
-                SpawnAtViewEdges(camera);
+                int toSpawn = Math.Min(batchSize, Math.Max(1, maxAlive - enemies.Count));
+                for (int i = 0; i < toSpawn; i++) SpawnAtViewEdges(camera);
             }
 
             foreach (var e in enemies)
