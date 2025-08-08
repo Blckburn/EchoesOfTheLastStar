@@ -15,6 +15,7 @@ internal static class Program
         Raylib.InitWindow(WindowWidth, WindowHeight, "Echoes of the Last Star — Prototype");
         Raylib.SetTargetFPS(TargetFps);
         Raylib.SetMouseCursor(MouseCursor.Crosshair);
+        EchoesGame.Infra.Assets.Init(System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "textures"));
 
         var player = new Game.Player(new Vector2(0, 0));
         var enemySpawner = new Game.EnemySpawner();
@@ -42,11 +43,11 @@ internal static class Program
                 Raylib.ClearBackground(Color.Black);
                 camera.Target = player.Position;
                 Raylib.BeginMode2D(camera);
-                DrawGrid();
-                DrawWorldBounds();
+                DrawFloorTiles();
+                DrawWorldWalls();
                 enemySpawner.Draw();
                 projectilePool.Draw();
-                player.Draw();
+                player.Draw(camera);
                 Raylib.EndMode2D();
                 DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count);
                 Raylib.EndDrawing();
@@ -65,11 +66,11 @@ internal static class Program
 
             camera.Target = player.Position;
             Raylib.BeginMode2D(camera);
-            DrawGrid();
-            DrawWorldBounds();
+            DrawFloorTiles();
+            DrawWorldWalls();
             enemySpawner.Draw();
             projectilePool.Draw();
-            player.Draw();
+            player.Draw(camera);
             Raylib.EndMode2D();
 
             DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count);
@@ -77,6 +78,7 @@ internal static class Program
             Raylib.EndDrawing();
         }
 
+        EchoesGame.Infra.Assets.Dispose();
         Raylib.CloseWindow();
     }
 
@@ -105,15 +107,100 @@ internal static class Program
         Raylib.DrawRectangleLinesEx(rec, 4, Color.DarkGray);
     }
 
+    private static void DrawFloorTiles()
+    {
+        if (TryGetTex(out var tile, "floor_tile.png", "floor.png"))
+        {
+            int halfW = Config.WorldWidth / 2;
+            int halfH = Config.WorldHeight / 2;
+            for (int y = -halfH; y < halfH; y += tile.Height)
+            {
+                for (int x = -halfW; x < halfW; x += tile.Width)
+                {
+                    Raylib.DrawTexture(tile, x, y, Color.White);
+                }
+            }
+        }
+        else
+        {
+            DrawGrid();
+        }
+    }
+
+    private static void DrawWorldWalls()
+    {
+        if (TryGetTex(out var wall, "wall_tile.png", "wall.png", "walls_tile.png"))
+        {
+            int halfW = Config.WorldWidth / 2;
+            int halfH = Config.WorldHeight / 2;
+            for (int x = -halfW; x < halfW; x += wall.Width)
+            {
+                Raylib.DrawTexture(wall, x, -halfH - wall.Height, Color.White);
+                Raylib.DrawTexture(wall, x, halfH, Color.White);
+            }
+            for (int y = -halfH; y < halfH; y += wall.Height)
+            {
+                Raylib.DrawTexture(wall, -halfW - wall.Width, y, Color.White);
+                Raylib.DrawTexture(wall, halfW, y, Color.White);
+            }
+        }
+        else
+        {
+            DrawWorldBounds();
+        }
+    }
+
+    private static bool TryGetTex(out Texture2D tex, params string[] candidates)
+    {
+        foreach (var name in candidates)
+        {
+            if (Assets.TryGet(name, out tex)) return true;
+        }
+        tex = default;
+        return false;
+    }
+
     private static void DrawHud(Game.Player player, bool paused, int bullets, int enemies)
     {
         int y = 16;
         Raylib.DrawText($"FPS: {Raylib.GetFPS()}", 16, y, 18, Color.RayWhite); y += 20;
         Raylib.DrawText($"Dash CD: {player.DashCooldownRemaining:0.00}s", 16, y, 18, Color.RayWhite); y += 20;
         Raylib.DrawText($"Bullets: {bullets}  Enemies: {enemies}", 16, y, 18, Color.RayWhite); y += 20;
+        // Dash readiness bar (0..1)
+        float readiness = 1f - (player.DashCooldownRemaining / player.DashCooldownTotal);
+        if (readiness < 0f) readiness = 0f; if (readiness > 1f) readiness = 1f;
+        DrawBar(16, y + 6, 256, 16, readiness);
+        y += 26;
         if (paused)
         {
             Raylib.DrawText("PAUSED (P)", 16, y, 20, Color.Gold);
+        }
+    }
+
+    private static void DrawBar(int x, int y, int width, int height, float normalized)
+    {
+        if (Assets.TryGet("ui_bar_bg.png", out var bg) && Assets.TryGet("ui_bar_fg.png", out var fg))
+        {
+            // Background
+            var srcBg = new Rectangle(0, 0, bg.Width, bg.Height);
+            var dstBg = new Rectangle(x, y, width, height);
+            Raylib.DrawTexturePro(bg, srcBg, dstBg, new Vector2(0, 0), 0, Color.White);
+
+            // Foreground fill portion
+            int fillSrc = (int)(fg.Width * normalized);
+            if (fillSrc > 0)
+            {
+                var srcFg = new Rectangle(0, 0, fillSrc, fg.Height);
+                var dstFg = new Rectangle(x, y, width * normalized, height);
+                Raylib.DrawTexturePro(fg, srcFg, dstFg, new Vector2(0, 0), 0, Color.White);
+            }
+        }
+        else
+        {
+            // Fallback rectangles
+            Raylib.DrawRectangle(x, y, width, height, Color.DarkGray);
+            Raylib.DrawRectangle(x, y, (int)(width * normalized), height, Color.Gold);
+            Raylib.DrawRectangleLines(x, y, width, height, Color.Black);
         }
     }
 }
@@ -141,6 +228,7 @@ namespace EchoesGame.Game
         private Vector2 dashDirection;
 
         public float DashCooldownRemaining => MathF.Max(0f, DashCooldown - dashCooldownTimer);
+        public float DashCooldownTotal => DashCooldown;
 
         public Player(Vector2 start)
         {
@@ -215,10 +303,38 @@ namespace EchoesGame.Game
             }
         }
 
-        public void Draw()
+        public void Draw(Camera2D camera)
         {
-            Color color = isDashing ? Color.Gold : Color.SkyBlue;
-            Raylib.DrawCircleV(Position, 14f, color);
+            // Body rotated towards mouse like weapon
+            if (Assets.TryGet("player_human_idle.png", out var body))
+            {
+                Vector2 mouse = Raylib.GetMousePosition();
+                Vector2 mouseWorld = Raylib.GetScreenToWorld2D(mouse, camera);
+                Vector2 dir = mouseWorld - Position;
+                float angleDeg = MathF.Atan2(dir.Y, dir.X) * (180f / MathF.PI);
+                var src = new Rectangle(0, 0, body.Width, body.Height);
+                var dst = new Rectangle(Position.X, Position.Y, body.Width, body.Height);
+                var origin = new Vector2(body.Width / 2f, body.Height / 2f);
+                Raylib.DrawTexturePro(body, src, dst, origin, angleDeg, Color.White);
+            }
+            else
+            {
+                Color color = isDashing ? Color.Gold : Color.SkyBlue;
+                Raylib.DrawCircleV(Position, 14f, color);
+            }
+
+            // Weapon (rotates towards mouse, anchored at player center)
+            if (Assets.TryGet("weapon_basic.png", out var gun))
+            {
+                Vector2 mouse = Raylib.GetMousePosition();
+                Vector2 mouseWorld = Raylib.GetScreenToWorld2D(mouse, camera);
+                Vector2 dir = mouseWorld - Position;
+                float angleDeg = MathF.Atan2(dir.Y, dir.X) * (180f / MathF.PI);
+                var src = new Rectangle(0, 0, gun.Width, gun.Height);
+                var dst = new Rectangle(Position.X, Position.Y, gun.Width, gun.Height);
+                var origin = new Vector2(gun.Width / 2f, gun.Height / 2f);
+                Raylib.DrawTexturePro(gun, src, dst, origin, angleDeg, Color.White);
+            }
         }
     }
 
@@ -245,7 +361,18 @@ namespace EchoesGame.Game
         public void Draw()
         {
             if (!Active) return;
-            Raylib.DrawCircleV(Position, Radius, Color.Lime);
+            if (Assets.TryGet("bullet_basic.png", out var tex))
+            {
+                float angleDeg = MathF.Atan2(Velocity.Y, Velocity.X) * (180f / MathF.PI);
+                var src = new Rectangle(0, 0, tex.Width, tex.Height);
+                var dst = new Rectangle(Position.X, Position.Y, tex.Width, tex.Height);
+                var origin = new Vector2(tex.Width / 2f, tex.Height / 2f);
+                Raylib.DrawTexturePro(tex, src, dst, origin, angleDeg, Color.White);
+            }
+            else
+            {
+                Raylib.DrawCircleV(Position, Radius, Color.Lime);
+            }
         }
 
         public Rectangle GetBounds() => new Rectangle(Position.X - Radius, Position.Y - Radius, Radius * 2, Radius * 2);
@@ -324,7 +451,17 @@ namespace EchoesGame.Game
         public void Draw()
         {
             if (!Alive) return;
-            Raylib.DrawCircleV(Position, Radius, Color.Maroon);
+            if (Assets.TryGet("enemy_chaser.png", out var tex))
+            {
+                var src = new Rectangle(0, 0, tex.Width, tex.Height);
+                var dst = new Rectangle(Position.X, Position.Y, tex.Width, tex.Height);
+                var origin = new Vector2(tex.Width / 2f, tex.Height / 2f);
+                Raylib.DrawTexturePro(tex, src, dst, origin, 0, Color.White);
+            }
+            else
+            {
+                Raylib.DrawCircleV(Position, Radius, Color.Maroon);
+            }
         }
 
         public Rectangle GetBounds() => new Rectangle(Position.X - Radius, Position.Y - Radius, Radius * 2, Radius * 2);
