@@ -1,6 +1,7 @@
 ﻿using Raylib_cs;
 using System.Numerics;
 using EchoesGame.Infra;
+using System.Linq;
 
 namespace EchoesGame
 {
@@ -22,6 +23,8 @@ internal static class Program
         var projectilePool = new Game.ProjectilePool(capacity: 512);
         var xpSystem = new Game.XPSystem();
         var xpOrbs = new Game.XPOrbPool(capacity: 512);
+        var draft = new Game.LevelUpDraft();
+        bool draftOpen = false;
         var camera = new Camera2D
         {
             Target = player.Position,
@@ -30,15 +33,19 @@ internal static class Program
             Zoom = 1f
         };
         bool paused = false;
+        bool gameOver = false;
+        float elapsed = 0f;
+        int score = 0;
         EchoesGame.Infra.Analytics.Init();
         EchoesGame.Infra.Analytics.Log("start_run", new System.Collections.Generic.Dictionary<string, object>());
+        int lastPending = 0;
 
         while (!Raylib.WindowShouldClose())
         {
             float dt = Raylib.GetFrameTime();
 
             if (Raylib.IsKeyPressed(KeyboardKey.P)) paused = !paused;
-            if (paused)
+            if (paused || draftOpen || gameOver)
             {
                 // Draw only
                 Raylib.BeginDrawing();
@@ -47,22 +54,66 @@ internal static class Program
                 Raylib.BeginMode2D(camera);
                 DrawFloorTiles();
                 DrawWorldWalls();
-                enemySpawner.Draw();
+                enemySpawner.Draw(player.Position);
                 xpOrbs.Draw();
                 projectilePool.Draw();
                 player.Draw(camera);
                 Raylib.EndMode2D();
-                DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem);
+                DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
+                if (draftOpen)
+                {
+                    draft.Draw();
+                    // Handle input 1..3 or click
+                    if (Raylib.IsKeyPressed(KeyboardKey.One)) { draft.Apply(0, player); xpSystem.ConsumePending(); draftOpen = false; }
+                    else if (Raylib.IsKeyPressed(KeyboardKey.Two)) { draft.Apply(1, player); xpSystem.ConsumePending(); draftOpen = false; }
+                    else if (Raylib.IsKeyPressed(KeyboardKey.Three)) { draft.Apply(2, player); xpSystem.ConsumePending(); draftOpen = false; }
+                    else if (Raylib.IsMouseButtonPressed(MouseButton.Left))
+                    {
+                        int i = draft.HitTest(Raylib.GetMousePosition());
+                        if (i >= 0) { draft.Apply(i, player); xpSystem.ConsumePending(); draftOpen = false; }
+                    }
+                }
+                if (gameOver)
+                {
+                    DrawGameOver();
+                    if (Raylib.IsKeyPressed(KeyboardKey.R)) { ResetGame(ref player, enemySpawner, ref projectilePool, ref xpOrbs, ref xpSystem, ref draftOpen, ref gameOver, ref elapsed, ref score); }
+                }
                 Raylib.EndDrawing();
                 continue;
             }
 
             // Update
+            elapsed += dt;
+            player.TickDamageIFrames(dt);
             player.Update(dt, projectilePool, camera);
             enemySpawner.Update(dt, player.Position, camera);
             projectilePool.Update(dt);
-            xpOrbs.Update(dt, player.Position, xpSystem);
-            Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (pos) => xpOrbs.Spawn(pos, 1));
+            xpOrbs.Update(dt, player.Position, xpSystem, player.XPMagnetMultiplier);
+            Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (enemy) => { xpOrbs.Spawn(enemy.Position, Raylib.GetRandomValue(1,2)); score += enemy.IsElite ? 25 : 10; });
+
+            // Heal on level up (10% max)
+            if (xpSystem.PendingChoices > lastPending)
+            {
+                player.HealPercent(0.10f);
+                lastPending = xpSystem.PendingChoices;
+            }
+
+            // Contact damage
+            foreach (var e in enemySpawner.Enemies)
+            {
+                if (!e.Alive) continue;
+                if (Raylib.CheckCollisionRecs(new Rectangle(player.Position.X - 10, player.Position.Y - 10, 20, 20), e.GetBounds()))
+                {
+                    player.TakeDamage(e.ContactDamage);
+                }
+            }
+            if (player.IsDead) { gameOver = true; }
+
+            if (!draftOpen && xpSystem.PendingChoices > 0)
+            {
+                draft.Open();
+                draftOpen = true;
+            }
 
             // Draw
             Raylib.BeginDrawing();
@@ -72,13 +123,14 @@ internal static class Program
             Raylib.BeginMode2D(camera);
             DrawFloorTiles();
             DrawWorldWalls();
-            enemySpawner.Draw();
+            enemySpawner.Draw(player.Position);
             xpOrbs.Draw();
             projectilePool.Draw();
             player.Draw(camera);
             Raylib.EndMode2D();
 
-            DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem);
+            DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
+            if (draftOpen) draft.Draw();
 
             Raylib.EndDrawing();
         }
@@ -165,10 +217,10 @@ internal static class Program
         return false;
     }
 
-    private static void DrawHud(Game.Player player, bool paused, int bullets, int enemies, Game.XPSystem xp)
+    private static void DrawHud(Game.Player player, bool paused, int bullets, int enemies, Game.XPSystem xp, float elapsedSeconds = 0f, int score = 0)
     {
         int y = 16;
-        Raylib.DrawText($"FPS: {Raylib.GetFPS()}", 16, y, 18, Color.RayWhite); y += 20;
+        Raylib.DrawText($"FPS: {Raylib.GetFPS()}  Time: {elapsedSeconds:0}s  Score: {score}", 16, y, 18, Color.RayWhite); y += 20;
         Raylib.DrawText($"Dash CD: {player.DashCooldownRemaining:0.00}s", 16, y, 18, Color.RayWhite); y += 20;
         Raylib.DrawText($"Bullets: {bullets}  Enemies: {enemies}", 16, y, 18, Color.RayWhite); y += 20;
         // Dash readiness bar (0..1)
@@ -176,20 +228,71 @@ internal static class Program
         if (readiness < 0f) readiness = 0f; if (readiness > 1f) readiness = 1f;
         DrawBar(16, y + 6, 256, 16, readiness);
         y += 26;
+        // HP bar (red variant if present)
+        DrawBar(16, y + 6, 256, 16, MathF.Max(0f, player.HP / player.MaxHP), "ui_bar_bg.png", TryHasRed() ? "ui_bar_fg_red.png" : "ui_bar_fg.png");
+        y += 26;
         // XP bar and level
         float xpNorm = xp.ProgressNormalized;
         DrawBar(16, y + 6, 256, 16, xpNorm);
         Raylib.DrawText($"LVL: {xp.Level}", 280, y, 18, Color.RayWhite);
         y += 26;
+        // Active modifiers (stacked, per line)
+        if (player.ModStacks.Count > 0)
+        {
+            Raylib.DrawText("Mods:", 16, y, 18, Color.RayWhite); y += 20;
+            foreach (var kv in player.ModStacks)
+            {
+                string line = kv.Key switch {
+                    Game.Player.ModType.BulletSpeed => $"+{kv.Value*15}% bullet speed",
+                    Game.Player.ModType.ShootInterval => $"-{kv.Value*10}% shoot interval",
+                    Game.Player.ModType.BulletDamage => $"+{kv.Value*20}% bullet damage",
+                    Game.Player.ModType.MoveSpeed => $"+{kv.Value*10}% move speed",
+                    Game.Player.ModType.XPMagnet => $"+{kv.Value*20}% XP magnet",
+                    Game.Player.ModType.DashCooldown => $"-{kv.Value*10}% dash cooldown",
+                    _ => $"x{kv.Value}"
+                };
+                Raylib.DrawText(line, 16, y, 16, Color.RayWhite); y += 18;
+            }
+        }
         if (paused)
         {
             Raylib.DrawText("PAUSED (P)", 16, y, 20, Color.Gold);
         }
     }
 
-    private static void DrawBar(int x, int y, int width, int height, float normalized)
+    private static bool TryHasRed()
     {
-        if (Assets.TryGet("ui_bar_bg.png", out var bg) && Assets.TryGet("ui_bar_fg.png", out var fg))
+        return Assets.TryGet("ui_bar_fg_red.png", out _);
+    }
+
+    private static void DrawGameOver()
+    {
+        var w = Raylib.GetScreenWidth();
+        var h = Raylib.GetScreenHeight();
+        Raylib.DrawRectangle(0, 0, w, h, new Color(0,0,0,160));
+        var text = "GAME OVER - Press R to Restart";
+        int size = 32;
+        int tw = Raylib.MeasureText(text, size);
+        Raylib.DrawText(text, (w - tw)/2, h/2 - size, size, Color.Gold);
+    }
+
+    private static void ResetGame(ref Game.Player player, Game.EnemySpawner spawner, ref Game.ProjectilePool proj, ref Game.XPOrbPool xpPool, ref Game.XPSystem xp, ref bool draftOpen, ref bool gameOver, ref float elapsed, ref int score)
+    {
+        player = new Game.Player(new Vector2(0,0));
+        typeof(Game.EnemySpawner).GetField("enemies", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(spawner, new System.Collections.Generic.List<Game.Enemy>());
+        proj = new Game.ProjectilePool(512);
+        xpPool = new Game.XPOrbPool(512);
+        xp = new Game.XPSystem();
+        draftOpen = false;
+        gameOver = false;
+        elapsed = 0f;
+        score = 0;
+    }
+
+    private static void DrawBar(int x, int y, int width, int height, float normalized, string barBg = "ui_bar_bg.png", string barFg = "ui_bar_fg.png")
+    {
+        if (Assets.TryGet(barBg, out var bg) && Assets.TryGet(barFg, out var fg))
         {
             // Background
             var srcBg = new Rectangle(0, 0, bg.Width, bg.Height);
@@ -231,6 +334,52 @@ namespace EchoesGame.Game
         private const float DashSpeed = 1100f;
         private const float DashDuration = 0.20f; // seconds of iFrames
         private const float DashCooldown = 4.0f;
+        public float BulletSpeedMultiplier = 1.0f;
+        public float ShootIntervalMultiplier = 1.0f;
+        public float BulletDamageMultiplier = 1.0f;
+        public float PlayerSpeedMultiplier = 1.0f;
+        public float DashCooldownMultiplier = 1.0f;
+        public float XPMagnetMultiplier = 1.0f;
+        public readonly Dictionary<ModType, int> ModStacks = new();
+
+        public enum ModType { BulletSpeed, ShootInterval, BulletDamage, MoveSpeed, XPMagnet, DashCooldown }
+
+        public void ApplyMod(ModType type, int stacks = 1)
+        {
+            if (!ModStacks.ContainsKey(type)) ModStacks[type] = 0;
+            ModStacks[type] += stacks;
+            RecomputeMultipliers();
+        }
+
+        private int GetStacks(ModType t) => ModStacks.TryGetValue(t, out var v) ? v : 0;
+
+        private void RecomputeMultipliers()
+        {
+            BulletSpeedMultiplier = 1f + 0.15f * GetStacks(ModType.BulletSpeed);
+            BulletDamageMultiplier = 1f + 0.20f * GetStacks(ModType.BulletDamage);
+            ShootIntervalMultiplier = MathF.Max(0.3f, 1f - 0.10f * GetStacks(ModType.ShootInterval));
+            PlayerSpeedMultiplier = 1f + 0.10f * GetStacks(ModType.MoveSpeed);
+            XPMagnetMultiplier = 1f + 0.20f * GetStacks(ModType.XPMagnet);
+            DashCooldownMultiplier = MathF.Max(0.3f, 1f - 0.10f * GetStacks(ModType.DashCooldown));
+        }
+
+        // Health
+        public float MaxHP { get; private set; } = 100f;
+        public float HP { get; private set; } = 100f;
+        public bool IsDead => HP <= 0f;
+        private float damageIFrames = 0f;
+        public void TakeDamage(float dmg)
+        {
+            if (damageIFrames > 0f) return;
+            HP -= dmg;
+            if (HP < 0f) HP = 0f;
+            damageIFrames = 0.4f; // minimal tick between damage
+        }
+        public void TickDamageIFrames(float dt) { if (damageIFrames > 0f) damageIFrames -= dt; }
+        public void HealPercent(float p)
+        {
+            HP = MathF.Min(MaxHP, HP + MaxHP * p);
+        }
 
         private bool isDashing;
         private float dashTimer;
@@ -261,7 +410,7 @@ namespace EchoesGame.Game
                 if (Raylib.IsKeyDown(KeyboardKey.A)) input.X -= 1f;
                 if (Raylib.IsKeyDown(KeyboardKey.D)) input.X += 1f;
                 if (input.LengthSquared() > 1e-5f) input = Vector2.Normalize(input);
-                velocity = input * MoveSpeed;
+                velocity = input * (MoveSpeed * PlayerSpeedMultiplier);
                 Position += velocity * dt;
 
                 // Clamp to world bounds
@@ -270,7 +419,7 @@ namespace EchoesGame.Game
                 Position = new Vector2(Config.Clamp(Position.X, -halfW, halfW), Config.Clamp(Position.Y, -halfH, halfH));
 
                 // Dash start
-                if (dashCooldownTimer >= DashCooldown && Raylib.IsKeyPressed(KeyboardKey.LeftShift))
+                if (dashCooldownTimer >= DashCooldown * DashCooldownMultiplier && Raylib.IsKeyPressed(KeyboardKey.LeftShift))
                 {
                     isDashing = true;
                     dashTimer = 0f;
@@ -295,12 +444,13 @@ namespace EchoesGame.Game
         }
 
         private float shootTimer;
-        private const float ShootInterval = 0.12f; // auto-fire
+        private const float ShootIntervalBase = 0.12f; // auto-fire base
 
         private void HandleShooting(float dt, ProjectilePool projectiles, Camera2D camera)
         {
             shootTimer += dt;
-            if (shootTimer >= ShootInterval)
+            float shootInterval = ShootIntervalBase * ShootIntervalMultiplier;
+            if (shootTimer >= shootInterval)
             {
                 shootTimer = 0f;
                 // Direction towards mouse in world space
@@ -309,7 +459,9 @@ namespace EchoesGame.Game
                 Vector2 dir = mouseWorld - Position;
                 if (dir.LengthSquared() < 1e-5f) dir = new Vector2(1, 0);
                 dir = Vector2.Normalize(dir);
-                projectiles.Spawn(Position, dir * 900f);
+                float speed = 900f * BulletSpeedMultiplier;
+                float dmg = 10f * BulletDamageMultiplier;
+                projectiles.Spawn(Position, dir * speed, dmg);
             }
         }
 
@@ -355,6 +507,16 @@ namespace EchoesGame.Game
         public bool Active;
         private const float Radius = 4f;
         private float lifetime = 2.0f;
+        public float Damage = 10f;
+
+        public void Reset(Vector2 pos, Vector2 vel, float damage)
+        {
+            Position = pos;
+            Velocity = vel;
+            Damage = damage;
+            lifetime = 2.0f;
+            Active = true;
+        }
 
         public void Update(float dt)
         {
@@ -399,16 +561,14 @@ namespace EchoesGame.Game
             for (int i = 0; i < capacity; i++) pool[i] = new Projectile();
         }
 
-        public void Spawn(Vector2 pos, Vector2 vel)
+        public void Spawn(Vector2 pos, Vector2 vel, float damage = 10f)
         {
             for (int i = 0; i < pool.Length; i++)
             {
                 next = (next + 1) % pool.Length;
                 if (!pool[next].Active)
                 {
-                    pool[next].Active = true;
-                    pool[next].Position = pos;
-                    pool[next].Velocity = vel;
+                    pool[next].Reset(pos, vel, damage);
                     return;
                 }
             }
@@ -443,9 +603,18 @@ namespace EchoesGame.Game
     internal sealed class Enemy
     {
         public Vector2 Position;
-        private const float Speed = 110f;
+        public float Speed = 110f;
         private const float Radius = 12f;
         public bool Alive = true;
+        public float MaxHP = 20f;
+        public float HP = 20f;
+        public bool IsTank = false;
+        public bool IsSprinter = false;
+        public bool IsElite = false;
+        public EnemyMod Modifier = EnemyMod.None;
+        private float hitFlash;
+        public float ContactDamage => IsTank ? 25f : 15f;
+        private float faceAngleDeg;
 
         public void Update(float dt, Vector2 target)
         {
@@ -456,17 +625,25 @@ namespace EchoesGame.Game
                 dir = Vector2.Normalize(dir);
                 Position += dir * Speed * dt;
             }
+            if (hitFlash > 0f) hitFlash -= dt;
         }
 
         public void Draw()
         {
             if (!Alive) return;
-            if (Assets.TryGet("enemy_chaser.png", out var tex))
+            string texName = IsTank ? "enemy_tank.png" : (IsSprinter ? "enemy_sprinter.png" : "enemy_chaser.png");
+            if (Assets.TryGet(texName, out var tex))
             {
                 var src = new Rectangle(0, 0, tex.Width, tex.Height);
                 var dst = new Rectangle(Position.X, Position.Y, tex.Width, tex.Height);
                 var origin = new Vector2(tex.Width / 2f, tex.Height / 2f);
-                Raylib.DrawTexturePro(tex, src, dst, origin, 0, Color.White);
+                var tint = hitFlash > 0f ? Color.Orange : (IsSprinter ? Color.SkyBlue : Color.White);
+                Raylib.DrawTexturePro(tex, src, dst, origin, faceAngleDeg, tint);
+                // HP bar
+                float w = 32f; float h = 4f;
+                float n = MathF.Max(0f, HP) / MathF.Max(1f, MaxHP);
+                Raylib.DrawRectangle((int)(Position.X - w / 2f), (int)(Position.Y - tex.Height / 2f - 10), (int)w, (int)h, Color.DarkGray);
+                Raylib.DrawRectangle((int)(Position.X - w / 2f), (int)(Position.Y - tex.Height / 2f - 10), (int)(w * n), (int)h, IsTank ? Color.Red : Color.Green);
             }
             else
             {
@@ -475,13 +652,24 @@ namespace EchoesGame.Game
         }
 
         public Rectangle GetBounds() => new Rectangle(Position.X - Radius, Position.Y - Radius, Radius * 2, Radius * 2);
+        public void TakeDamage(float dmg)
+        {
+            // Elite shielded reduces incoming damage
+            if (IsElite && Modifier == EnemyMod.Shielded) dmg *= 0.6f;
+            HP -= dmg;
+            hitFlash = 0.1f;
+            if (HP <= 0f) Alive = false;
+        }
     }
+
+    internal enum EnemyMod { None, Shielded, Berserk }
 
     internal sealed class XPSystem
     {
         public int Level { get; private set; } = 1;
         public int CurrentXP { get; private set; }
-        public int NextLevelXP { get; private set; } = 10;
+        public int NextLevelXP { get; private set; } = 5;
+        public int PendingChoices { get; private set; }
 
         public float ProgressNormalized => MathF.Min(1f, (float)CurrentXP / NextLevelXP);
 
@@ -492,8 +680,14 @@ namespace EchoesGame.Game
             {
                 CurrentXP -= NextLevelXP;
                 Level++;
-                NextLevelXP = (int)(NextLevelXP * 1.35f + 1);
+                NextLevelXP = (int)(NextLevelXP * 1.20f + 1);
+                PendingChoices++;
             }
+        }
+
+        public void ConsumePending()
+        {
+            if (PendingChoices > 0) PendingChoices--;
         }
     }
 
@@ -534,6 +728,76 @@ namespace EchoesGame.Game
         public Rectangle GetBounds(float radius = 12f) => new Rectangle(Position.X - radius, Position.Y - radius, radius * 2, radius * 2);
     }
 
+    internal sealed class LevelUpDraft
+    {
+        private readonly string[] titles = new[] {
+            "+15% bullet speed", "-10% shoot interval", "+20% bullet damage",
+            "+10% move speed", "+20% XP magnet", "-10% dash cooldown" };
+        private readonly string[] descs = new[] {
+            "Bullets travel faster", "Fire more frequently", "Bullets deal more damage",
+            "Player moves faster", "XP orbs pull from farther", "Dash cooldown reduced" };
+        private Rectangle[] cardRects = Array.Empty<Rectangle>();
+
+        public void Open()
+        {
+            int x = 200; int y = 200; int w = 280; int h = 120; int gap = 24;
+            // pick 3 unique indices from the list
+            int[] idx = ShufflePick(Enumerable.Range(0, titles.Length).ToArray(), 3);
+            cardRects = new Rectangle[] { new Rectangle(x, y, w, h), new Rectangle(x + w + gap, y, w, h), new Rectangle(x + (w + gap)*2, y, w, h) };
+            shown = idx;
+        }
+
+        public void Draw()
+        {
+            // Dim background
+            Raylib.DrawRectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight(), new Color(0,0,0,180));
+            for (int i = 0; i < cardRects.Length; i++)
+            {
+                var r = cardRects[i];
+                bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+                var bg = hover ? new Color(120, 120, 120, 255) : Color.DarkGray;
+                Raylib.DrawRectangleRec(r, bg);
+                Raylib.DrawRectangleLinesEx(r, 2, hover ? Color.Gold : Color.Black);
+                int k = shown[i];
+                Raylib.DrawText($"{i+1}. {titles[k]}", (int)r.X + 12, (int)r.Y + 12, 20, Color.RayWhite);
+                Raylib.DrawText(descs[k], (int)r.X + 12, (int)r.Y + 44, 18, Color.RayWhite);
+            }
+        }
+
+        public int HitTest(Vector2 mouseScreen)
+        {
+            for (int i = 0; i < cardRects.Length; i++) if (Raylib.CheckCollisionPointRec(mouseScreen, cardRects[i])) return i;
+            return -1;
+        }
+
+        public void Apply(int index, Player player)
+        {
+            int k = shown[index];
+            switch (k)
+            {
+                case 0: player.ApplyMod(Player.ModType.BulletSpeed); break;
+                case 1: player.ApplyMod(Player.ModType.ShootInterval); break;
+                case 2: player.ApplyMod(Player.ModType.BulletDamage); break;
+                case 3: player.ApplyMod(Player.ModType.MoveSpeed); break;
+                case 4: player.ApplyMod(Player.ModType.XPMagnet); break;
+                case 5: player.ApplyMod(Player.ModType.DashCooldown); break;
+            }
+        }
+
+        private int[] shown = new int[3];
+
+        private static int[] ShufflePick(int[] arr, int count)
+        {
+            var rnd = new Random();
+            for (int i = arr.Length - 1; i > 0; i--)
+            {
+                int j = rnd.Next(i + 1);
+                (arr[i], arr[j]) = (arr[j], arr[i]);
+            }
+            return arr.Take(count).ToArray();
+        }
+    }
+
     internal sealed class XPOrbPool
     {
         private readonly XPOrb[] pool;
@@ -560,7 +824,7 @@ namespace EchoesGame.Game
             }
         }
 
-        public void Update(float dt, Vector2 playerPos, XPSystem xp)
+        public void Update(float dt, Vector2 playerPos, XPSystem xp, float magnetMultiplier)
         {
             for (int i = 0; i < pool.Length; i++)
             {
@@ -568,10 +832,12 @@ namespace EchoesGame.Game
                 if (!o.Active) continue;
                 // simple magnet
                 float dist = Vector2.Distance(playerPos, o.Position);
-                if (dist < 160f)
+                float magnetRadius = 160f * magnetMultiplier;
+                if (dist < magnetRadius)
                 {
                     Vector2 dir = Vector2.Normalize(playerPos - o.Position);
-                    o.Position += dir * MathF.Max(200f, 600f - dist * 2f) * dt;
+                    float pull = MathF.Max(200f, (600f * magnetMultiplier) - dist * 2f);
+                    o.Position += dir * pull * dt;
                 }
                 if (Raylib.CheckCollisionRecs(o.GetBounds(10f), new Rectangle(playerPos.X - 8, playerPos.Y - 8, 16, 16)))
                 {
@@ -591,7 +857,9 @@ namespace EchoesGame.Game
     {
         private readonly List<Enemy> enemies = new();
         private float timer;
-        private const float Interval = 1.2f;
+        private float interval = 1.2f;
+        private int maxAlive = 40;
+        private float threat; // grows with time
 
         public IReadOnlyList<Enemy> Enemies => enemies;
         public int Count => enemies.Count;
@@ -599,19 +867,48 @@ namespace EchoesGame.Game
         public void Update(float dt, Vector2 target, Camera2D camera)
         {
             timer += dt;
-            if (timer >= Interval)
+            threat += dt;
+            // escalation
+            interval = MathF.Max(0.4f, 1.2f - threat * 0.01f);
+            maxAlive = 30 + (int)MathF.Min(70, threat * 0.8f);
+
+            if (timer >= interval && enemies.Count < maxAlive)
             {
                 timer = 0f;
                 SpawnAtViewEdges(camera);
             }
 
-            foreach (var e in enemies) e.Update(dt, target);
+            foreach (var e in enemies)
+            {
+                // Elite berserk speed boost when low HP
+                float spd = e.Speed;
+                if (e.IsElite && e.Modifier == EnemyMod.Berserk && e.HP < e.MaxHP * 0.5f)
+                {
+                    e.Speed = spd * 1.5f;
+                }
+                e.Update(dt, target);
+                e.Speed = spd; // restore base for next frame
+            }
             enemies.RemoveAll(e => !e.Alive);
         }
 
-        public void Draw()
+        public void Draw(Vector2 playerPos)
         {
-            foreach (var e in enemies) e.Draw();
+            foreach (var e in enemies)
+            {
+                // Face towards player
+                if (e.Alive)
+                {
+                    Vector2 dir = playerPos - e.Position;
+                    if (dir.LengthSquared() > 1e-5f)
+                    {
+                        float angle = MathF.Atan2(dir.Y, dir.X);
+                        e.GetType().GetField("faceAngleDeg", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                            .SetValue(e, angle * (180f/MathF.PI));
+                    }
+                }
+                e.Draw();
+            }
         }
 
         private void SpawnAtViewEdges(Camera2D camera)
@@ -629,13 +926,41 @@ namespace EchoesGame.Game
                 2 => new Vector2(Raylib.GetRandomValue((int)left, (int)right), top - 32),
                 _ => new Vector2(Raylib.GetRandomValue((int)left, (int)right), bottom + 32),
             };
-            enemies.Add(new Enemy { Position = pos });
+            int tankChance = (int)MathF.Min(50, 20 + threat * 0.2f);
+            int sprinterChance = (int)MathF.Min(40, 10 + threat * 0.15f);
+            int eliteChance = (int)MathF.Min(30, 5 + threat * 0.1f);
+            int roll = Raylib.GetRandomValue(0, 99);
+            bool spawnTank = roll < tankChance;
+            bool spawnSprinter = !spawnTank && roll < (tankChance + sprinterChance);
+            var e = new Enemy { Position = pos };
+            if (spawnTank)
+            {
+                e.IsTank = true;
+                e.Speed = 70f;
+                e.MaxHP = 60f;
+                e.HP = 60f;
+            }
+            else if (spawnSprinter)
+            {
+                e.IsSprinter = true;
+                e.Speed = 180f;
+                e.MaxHP = 14f;
+                e.HP = 14f;
+            }
+            // Elite?
+            if (Raylib.GetRandomValue(0, 99) < eliteChance)
+            {
+                e.IsElite = true;
+                e.Modifier = (EnemyMod)(Raylib.GetRandomValue(1, 2)); // Shielded or Berserk
+                e.MaxHP *= 1.5f; e.HP *= 1.5f;
+            }
+            enemies.Add(e);
         }
     }
 
     internal static class Collision
     {
-        public static void Resolve(ProjectilePool projectiles, IReadOnlyList<Enemy> enemies, System.Action<System.Numerics.Vector2>? onEnemyKilled = null)
+        public static void Resolve(ProjectilePool projectiles, IReadOnlyList<Enemy> enemies, System.Action<Enemy>? onEnemyKilled = null)
         {
             foreach (var p in projectiles.All())
             {
@@ -647,9 +972,12 @@ namespace EchoesGame.Game
                     if (!e.Alive) continue;
                     if (Raylib.CheckCollisionRecs(pb, e.GetBounds()))
                     {
-                        e.Alive = false;
+                        e.TakeDamage(p.Damage);
                         p.Active = false;
-                        onEnemyKilled?.Invoke(e.Position);
+                        if (!e.Alive)
+                        {
+                            onEnemyKilled?.Invoke(e);
+                        }
                         break;
                     }
                 }
