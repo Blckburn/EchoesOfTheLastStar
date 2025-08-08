@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+# Treat images/binaries
+*.png binary
+*.jpg binary
+*.ogg binary
+*.wav binary
+
+# Linguist hints
+*.cs linguist-language=C#

@@ -1,5 +1,6 @@
 ﻿using Raylib_cs;
 using System.Numerics;
+using EchoesGame.Infra;
 
 namespace EchoesGame
 {
@@ -13,18 +14,48 @@ internal static class Program
     {
         Raylib.InitWindow(WindowWidth, WindowHeight, "Echoes of the Last Star — Prototype");
         Raylib.SetTargetFPS(TargetFps);
+        Raylib.SetMouseCursor(MouseCursor.Crosshair);
 
-        var player = new Game.Player(new Vector2(WindowWidth / 2f, WindowHeight / 2f));
+        var player = new Game.Player(new Vector2(0, 0));
         var enemySpawner = new Game.EnemySpawner();
         var projectilePool = new Game.ProjectilePool(capacity: 512);
+        var camera = new Camera2D
+        {
+            Target = player.Position,
+            Offset = new Vector2(WindowWidth / 2f, WindowHeight / 2f),
+            Rotation = 0,
+            Zoom = 1f
+        };
+        bool paused = false;
+        EchoesGame.Infra.Analytics.Init();
+        EchoesGame.Infra.Analytics.Log("start_run", new System.Collections.Generic.Dictionary<string, object>());
 
         while (!Raylib.WindowShouldClose())
         {
             float dt = Raylib.GetFrameTime();
 
+            if (Raylib.IsKeyPressed(KeyboardKey.P)) paused = !paused;
+            if (paused)
+            {
+                // Draw only
+                Raylib.BeginDrawing();
+                Raylib.ClearBackground(Color.Black);
+                camera.Target = player.Position;
+                Raylib.BeginMode2D(camera);
+                DrawGrid();
+                DrawWorldBounds();
+                enemySpawner.Draw();
+                projectilePool.Draw();
+                player.Draw();
+                Raylib.EndMode2D();
+                DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count);
+                Raylib.EndDrawing();
+                continue;
+            }
+
             // Update
-            player.Update(dt, projectilePool);
-            enemySpawner.Update(dt, player.Position);
+            player.Update(dt, projectilePool, camera);
+            enemySpawner.Update(dt, player.Position, camera);
             projectilePool.Update(dt);
             Game.Collision.Resolve(projectilePool, enemySpawner.Enemies);
 
@@ -32,12 +63,16 @@ internal static class Program
             Raylib.BeginDrawing();
             Raylib.ClearBackground(Color.Black);
 
-            DrawArenaBounds();
+            camera.Target = player.Position;
+            Raylib.BeginMode2D(camera);
+            DrawGrid();
+            DrawWorldBounds();
             enemySpawner.Draw();
             projectilePool.Draw();
             player.Draw();
+            Raylib.EndMode2D();
 
-            DrawHud(player);
+            DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count);
 
             Raylib.EndDrawing();
         }
@@ -45,15 +80,41 @@ internal static class Program
         Raylib.CloseWindow();
     }
 
-    private static void DrawArenaBounds()
+    private static void DrawGrid()
     {
-            Raylib.DrawRectangleLines(32, 32, WindowWidth - 64, WindowHeight - 64, Color.DarkGray);
+        const int step = 256;
+        int halfW = Config.WorldWidth / 2;
+        int halfH = Config.WorldHeight / 2;
+        var origin = new Vector2(0, 0);
+        Raylib.DrawCircleV(origin, 6, Color.DarkGray);
+        for (int x = -halfW; x <= halfW; x += step)
+        {
+            Raylib.DrawLine(x, -halfH, x, halfH, Color.DarkGray);
+        }
+        for (int y = -halfH; y <= halfH; y += step)
+        {
+            Raylib.DrawLine(-halfW, y, halfW, y, Color.DarkGray);
+        }
     }
 
-    private static void DrawHud(Game.Player player)
+    private static void DrawWorldBounds()
     {
-        string dash = $"Dash CD: {player.DashCooldownRemaining:0.00}s";
-        Raylib.DrawText(dash, 24, 24, 18, Color.RayWhite);
+        int halfW = Config.WorldWidth / 2;
+        int halfH = Config.WorldHeight / 2;
+        var rec = new Rectangle(-halfW, -halfH, Config.WorldWidth, Config.WorldHeight);
+        Raylib.DrawRectangleLinesEx(rec, 4, Color.DarkGray);
+    }
+
+    private static void DrawHud(Game.Player player, bool paused, int bullets, int enemies)
+    {
+        int y = 16;
+        Raylib.DrawText($"FPS: {Raylib.GetFPS()}", 16, y, 18, Color.RayWhite); y += 20;
+        Raylib.DrawText($"Dash CD: {player.DashCooldownRemaining:0.00}s", 16, y, 18, Color.RayWhite); y += 20;
+        Raylib.DrawText($"Bullets: {bullets}  Enemies: {enemies}", 16, y, 18, Color.RayWhite); y += 20;
+        if (paused)
+        {
+            Raylib.DrawText("PAUSED (P)", 16, y, 20, Color.Gold);
+        }
     }
 }
 }
@@ -86,10 +147,10 @@ namespace EchoesGame.Game
             Position = start;
         }
 
-        public void Update(float dt, ProjectilePool projectiles)
+        public void Update(float dt, ProjectilePool projectiles, Camera2D camera)
         {
             UpdateMovement(dt);
-            HandleShooting(dt, projectiles);
+            HandleShooting(dt, projectiles, camera);
         }
 
         private void UpdateMovement(float dt)
@@ -105,8 +166,10 @@ namespace EchoesGame.Game
                 velocity = input * MoveSpeed;
                 Position += velocity * dt;
 
-                // Arena clamp
-                Position = Vector2.Clamp(Position, new Vector2(48, 48), new Vector2(1280 - 48, 720 - 48));
+                // Clamp to world bounds
+                float halfW = Config.WorldWidth / 2f - 16f;
+                float halfH = Config.WorldHeight / 2f - 16f;
+                Position = new Vector2(Config.Clamp(Position.X, -halfW, halfW), Config.Clamp(Position.Y, -halfH, halfH));
 
                 // Dash start
                 if (dashCooldownTimer >= DashCooldown && Raylib.IsKeyPressed(KeyboardKey.LeftShift))
@@ -127,22 +190,25 @@ namespace EchoesGame.Game
                     isDashing = false;
                     dashCooldownTimer = 0f;
                 }
-                Position = Vector2.Clamp(Position, new Vector2(48, 48), new Vector2(1280 - 48, 720 - 48));
+                float halfW2 = Config.WorldWidth / 2f - 16f;
+                float halfH2 = Config.WorldHeight / 2f - 16f;
+                Position = new Vector2(Config.Clamp(Position.X, -halfW2, halfW2), Config.Clamp(Position.Y, -halfH2, halfH2));
             }
         }
 
         private float shootTimer;
         private const float ShootInterval = 0.12f; // auto-fire
 
-        private void HandleShooting(float dt, ProjectilePool projectiles)
+        private void HandleShooting(float dt, ProjectilePool projectiles, Camera2D camera)
         {
             shootTimer += dt;
             if (shootTimer >= ShootInterval)
             {
                 shootTimer = 0f;
-                // Direction towards mouse for now
-                Vector2 mouse = Raylib.GetMousePosition();
-                Vector2 dir = mouse - Position;
+                // Direction towards mouse in world space
+                Vector2 mouseScreen = Raylib.GetMousePosition();
+                Vector2 mouseWorld = Raylib.GetScreenToWorld2D(mouseScreen, camera);
+                Vector2 dir = mouseWorld - Position;
                 if (dir.LengthSquared() < 1e-5f) dir = new Vector2(1, 0);
                 dir = Vector2.Normalize(dir);
                 projectiles.Spawn(Position, dir * 900f);
@@ -162,15 +228,18 @@ namespace EchoesGame.Game
         public Vector2 Velocity;
         public bool Active;
         private const float Radius = 4f;
+        private float lifetime = 2.0f;
 
         public void Update(float dt)
         {
             if (!Active) return;
             Position += Velocity * dt;
+            lifetime -= dt;
             if (Position.X < 32 || Position.X > 1280 - 32 || Position.Y < 32 || Position.Y > 720 - 32)
             {
-                Active = false;
+                // No hard world bounds; keep bullet alive
             }
+            if (lifetime <= 0f) Active = false;
         }
 
         public void Draw()
@@ -219,6 +288,19 @@ namespace EchoesGame.Game
         }
 
         public IEnumerable<Projectile> All() => pool;
+
+        public int ActiveCount
+        {
+            get
+            {
+                int count = 0;
+                for (int i = 0; i < pool.Length; i++)
+                {
+                    if (pool[i].Active) count++;
+                }
+                return count;
+            }
+        }
     }
 
     internal sealed class Enemy
@@ -255,14 +337,15 @@ namespace EchoesGame.Game
         private const float Interval = 1.2f;
 
         public IReadOnlyList<Enemy> Enemies => enemies;
+        public int Count => enemies.Count;
 
-        public void Update(float dt, Vector2 target)
+        public void Update(float dt, Vector2 target, Camera2D camera)
         {
             timer += dt;
             if (timer >= Interval)
             {
                 timer = 0f;
-                SpawnAtEdges(target);
+                SpawnAtViewEdges(camera);
             }
 
             foreach (var e in enemies) e.Update(dt, target);
@@ -274,15 +357,20 @@ namespace EchoesGame.Game
             foreach (var e in enemies) e.Draw();
         }
 
-        private void SpawnAtEdges(Vector2 target)
+        private void SpawnAtViewEdges(Camera2D camera)
         {
+            float left = camera.Target.X - camera.Offset.X;
+            float top = camera.Target.Y - camera.Offset.Y;
+            float right = left + (camera.Offset.X * 2f);
+            float bottom = top + (camera.Offset.Y * 2f);
+
             var rnd = Raylib.GetRandomValue(0, 3);
             Vector2 pos = rnd switch
             {
-                0 => new Vector2(48, Raylib.GetRandomValue(48, 720 - 48)),
-                1 => new Vector2(1280 - 48, Raylib.GetRandomValue(48, 720 - 48)),
-                2 => new Vector2(Raylib.GetRandomValue(48, 1280 - 48), 48),
-                _ => new Vector2(Raylib.GetRandomValue(48, 1280 - 48), 720 - 48),
+                0 => new Vector2(left - 32, Raylib.GetRandomValue((int)top, (int)bottom)),
+                1 => new Vector2(right + 32, Raylib.GetRandomValue((int)top, (int)bottom)),
+                2 => new Vector2(Raylib.GetRandomValue((int)left, (int)right), top - 32),
+                _ => new Vector2(Raylib.GetRandomValue((int)left, (int)right), bottom + 32),
             };
             enemies.Add(new Enemy { Position = pos });
         }
