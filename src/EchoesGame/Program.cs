@@ -892,26 +892,65 @@ namespace EchoesGame.Game
     internal sealed class PactOverlay
     {
         private Rectangle[] rects = Array.Empty<Rectangle>();
-        private string[] titles = new[] { "Storm Pact: +20% fire rate, +15% enemy speed", "Stone Pact: +20% HP, -15% move speed" };
+        private string[] titles = new[] {
+            "Storm Pact: +20% fire rate, +15% enemy speed",
+            "Stone Pact: +20% HP, -15% move speed"
+        };
         public bool Opened { get; private set; }
 
         public void Open()
         {
             Opened = true;
-            int x = 220; int y = 160; int w = 320; int h = 120; int gap = 32;
+            int x = 180; int y = 150; int w = 420; int h = 150; int gap = 40;
             rects = new[] { new Rectangle(x, y, w, h), new Rectangle(x + w + gap, y, w, h) };
         }
 
         public void Draw()
         {
-            Raylib.DrawRectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight(), new Color(0,0,0,160));
+            // Slight red tint to underline it's a pact, not a normal level up
+            Raylib.DrawRectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight(), new Color(140, 0, 0, 120));
             for (int i = 0; i < rects.Length; i++)
             {
                 var r = rects[i];
                 bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
-                Raylib.DrawRectangleRec(r, hover ? new Color(120,120,120,255) : Color.DarkGray);
+                var bg = hover ? new Color(140, 140, 140, 255) : new Color(90, 90, 90, 240);
+                Raylib.DrawRectangleRec(r, bg);
                 Raylib.DrawRectangleLinesEx(r, 2, hover ? Color.Gold : Color.Black);
-                Raylib.DrawText($"{i+1}. {titles[i]}", (int)r.X + 10, (int)r.Y + 12, 20, Color.RayWhite);
+                DrawTextWrappedWithShadow($"{i+1}. {titles[i]}", r, 22, 6, Color.RayWhite);
+            }
+        }
+
+        private static void DrawTextWrappedWithShadow(string text, Rectangle bounds, int fontSize, int lineSpacing, Color color)
+        {
+            int margin = 12;
+            int maxWidth = (int)bounds.Width - margin * 2;
+            var words = text.Split(' ');
+            string line = string.Empty;
+            int x = (int)bounds.X + margin;
+            int y = (int)bounds.Y + margin;
+            for (int wi = 0; wi < words.Length; wi++)
+            {
+                string test = string.IsNullOrEmpty(line) ? words[wi] : line + " " + words[wi];
+                int width = Raylib.MeasureText(test, fontSize);
+                if (width > maxWidth)
+                {
+                    // draw current line
+                    // shadow
+                    Raylib.DrawText(line, x + 1, y + 1, fontSize, Color.Black);
+                    // main
+                    Raylib.DrawText(line, x, y, fontSize, color);
+                    y += fontSize + lineSpacing;
+                    line = words[wi];
+                }
+                else
+                {
+                    line = test;
+                }
+            }
+            if (!string.IsNullOrEmpty(line))
+            {
+                Raylib.DrawText(line, x + 1, y + 1, fontSize, Color.Black);
+                Raylib.DrawText(line, x, y, fontSize, color);
             }
         }
 
