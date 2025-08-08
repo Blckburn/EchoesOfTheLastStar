@@ -20,6 +20,8 @@ internal static class Program
         var player = new Game.Player(new Vector2(0, 0));
         var enemySpawner = new Game.EnemySpawner();
         var projectilePool = new Game.ProjectilePool(capacity: 512);
+        var xpSystem = new Game.XPSystem();
+        var xpOrbs = new Game.XPOrbPool(capacity: 512);
         var camera = new Camera2D
         {
             Target = player.Position,
@@ -46,10 +48,11 @@ internal static class Program
                 DrawFloorTiles();
                 DrawWorldWalls();
                 enemySpawner.Draw();
+                xpOrbs.Draw();
                 projectilePool.Draw();
                 player.Draw(camera);
                 Raylib.EndMode2D();
-                DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count);
+                DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem);
                 Raylib.EndDrawing();
                 continue;
             }
@@ -58,7 +61,8 @@ internal static class Program
             player.Update(dt, projectilePool, camera);
             enemySpawner.Update(dt, player.Position, camera);
             projectilePool.Update(dt);
-            Game.Collision.Resolve(projectilePool, enemySpawner.Enemies);
+            xpOrbs.Update(dt, player.Position, xpSystem);
+            Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (pos) => xpOrbs.Spawn(pos, 1));
 
             // Draw
             Raylib.BeginDrawing();
@@ -69,11 +73,12 @@ internal static class Program
             DrawFloorTiles();
             DrawWorldWalls();
             enemySpawner.Draw();
+            xpOrbs.Draw();
             projectilePool.Draw();
             player.Draw(camera);
             Raylib.EndMode2D();
 
-            DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count);
+            DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem);
 
             Raylib.EndDrawing();
         }
@@ -160,7 +165,7 @@ internal static class Program
         return false;
     }
 
-    private static void DrawHud(Game.Player player, bool paused, int bullets, int enemies)
+    private static void DrawHud(Game.Player player, bool paused, int bullets, int enemies, Game.XPSystem xp)
     {
         int y = 16;
         Raylib.DrawText($"FPS: {Raylib.GetFPS()}", 16, y, 18, Color.RayWhite); y += 20;
@@ -170,6 +175,11 @@ internal static class Program
         float readiness = 1f - (player.DashCooldownRemaining / player.DashCooldownTotal);
         if (readiness < 0f) readiness = 0f; if (readiness > 1f) readiness = 1f;
         DrawBar(16, y + 6, 256, 16, readiness);
+        y += 26;
+        // XP bar and level
+        float xpNorm = xp.ProgressNormalized;
+        DrawBar(16, y + 6, 256, 16, xpNorm);
+        Raylib.DrawText($"LVL: {xp.Level}", 280, y, 18, Color.RayWhite);
         y += 26;
         if (paused)
         {
@@ -467,6 +477,116 @@ namespace EchoesGame.Game
         public Rectangle GetBounds() => new Rectangle(Position.X - Radius, Position.Y - Radius, Radius * 2, Radius * 2);
     }
 
+    internal sealed class XPSystem
+    {
+        public int Level { get; private set; } = 1;
+        public int CurrentXP { get; private set; }
+        public int NextLevelXP { get; private set; } = 10;
+
+        public float ProgressNormalized => MathF.Min(1f, (float)CurrentXP / NextLevelXP);
+
+        public void AddXP(int amount)
+        {
+            CurrentXP += amount;
+            while (CurrentXP >= NextLevelXP)
+            {
+                CurrentXP -= NextLevelXP;
+                Level++;
+                NextLevelXP = (int)(NextLevelXP * 1.35f + 1);
+            }
+        }
+    }
+
+    internal sealed class XPOrb
+    {
+        public Vector2 Position;
+        public bool Active;
+        public int Amount;
+        private float pickupRadius = 24f;
+
+        public void Update(float dt, Vector2 playerPos)
+        {
+            if (!Active) return;
+            float dist = Vector2.Distance(playerPos, Position);
+            if (dist < pickupRadius)
+            {
+                // Will be handled by pool to apply XP
+            }
+        }
+
+        public void Draw()
+        {
+            if (!Active) return;
+            if (Assets.TryGet("xp_orb.png", out var tex))
+            {
+                float scale = 0.25f; // downscale 128->32
+                var src = new Rectangle(0, 0, tex.Width, tex.Height);
+                var dst = new Rectangle(Position.X, Position.Y, tex.Width * scale, tex.Height * scale);
+                var origin = new Vector2((tex.Width * scale) / 2f, (tex.Height * scale) / 2f);
+                Raylib.DrawTexturePro(tex, src, dst, origin, 0, Color.White);
+            }
+            else
+            {
+                Raylib.DrawCircleV(Position, 8f, Color.Green);
+            }
+        }
+
+        public Rectangle GetBounds(float radius = 12f) => new Rectangle(Position.X - radius, Position.Y - radius, radius * 2, radius * 2);
+    }
+
+    internal sealed class XPOrbPool
+    {
+        private readonly XPOrb[] pool;
+        private int next;
+
+        public XPOrbPool(int capacity)
+        {
+            pool = new XPOrb[capacity];
+            for (int i = 0; i < capacity; i++) pool[i] = new XPOrb();
+        }
+
+        public void Spawn(Vector2 pos, int amount)
+        {
+            for (int i = 0; i < pool.Length; i++)
+            {
+                next = (next + 1) % pool.Length;
+                if (!pool[next].Active)
+                {
+                    pool[next].Active = true;
+                    pool[next].Position = pos;
+                    pool[next].Amount = amount;
+                    return;
+                }
+            }
+        }
+
+        public void Update(float dt, Vector2 playerPos, XPSystem xp)
+        {
+            for (int i = 0; i < pool.Length; i++)
+            {
+                var o = pool[i];
+                if (!o.Active) continue;
+                // simple magnet
+                float dist = Vector2.Distance(playerPos, o.Position);
+                if (dist < 160f)
+                {
+                    Vector2 dir = Vector2.Normalize(playerPos - o.Position);
+                    o.Position += dir * MathF.Max(200f, 600f - dist * 2f) * dt;
+                }
+                if (Raylib.CheckCollisionRecs(o.GetBounds(10f), new Rectangle(playerPos.X - 8, playerPos.Y - 8, 16, 16)))
+                {
+                    xp.AddXP(o.Amount);
+                    o.Active = false;
+                }
+            }
+        }
+
+        public void Draw()
+        {
+            for (int i = 0; i < pool.Length; i++) pool[i].Draw();
+        }
+    }
+
     internal sealed class EnemySpawner
     {
         private readonly List<Enemy> enemies = new();
@@ -515,7 +635,7 @@ namespace EchoesGame.Game
 
     internal static class Collision
     {
-        public static void Resolve(ProjectilePool projectiles, IReadOnlyList<Enemy> enemies)
+        public static void Resolve(ProjectilePool projectiles, IReadOnlyList<Enemy> enemies, System.Action<System.Numerics.Vector2>? onEnemyKilled = null)
         {
             foreach (var p in projectiles.All())
             {
@@ -529,6 +649,7 @@ namespace EchoesGame.Game
                     {
                         e.Alive = false;
                         p.Active = false;
+                        onEnemyKilled?.Invoke(e.Position);
                         break;
                     }
                 }
