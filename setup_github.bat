@@ -45,7 +45,8 @@ if errorlevel 1 (
   gh repo create EchoesOfTheLastStar --source . --public --push --confirm || goto :err
 )
 
-echo [OK] Repository initialized and pushed.
+echo [OK] Repository initialized and pushed (or remote configured).
+pause
 popd
 exit /b 0
 
