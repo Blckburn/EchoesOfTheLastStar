@@ -47,7 +47,7 @@ internal static class Program
         EchoesGame.Infra.Analytics.Log("start_run", new System.Collections.Generic.Dictionary<string, object>());
         int lastPending = 0;
         float nextPactAt = 30f;
-        float nextBossAt = 240f; // first mini-boss at 4:00
+        float nextBossAt = 60f; // first mini-boss at 1:00 for testing
 
         while (!Raylib.WindowShouldClose())
         {
