@@ -689,9 +689,10 @@ namespace EchoesGame.Game
             if (active.Count == 0) return;
             int padding = 8;
             int rowH = 22;
+            int contentW = width - padding * 2;
             int height = padding * 2 + 20 + active.Count * rowH;
-            // Solid red background (single piece) with red border
-            Raylib.DrawRectangle(x, y, width, height, new Color(140, 0, 0, 100));
+            // Neutral backdrop + border
+            Raylib.DrawRectangle(x, y, width, height, new Color(60, 60, 60, 140));
             Raylib.DrawRectangleLines(x, y, width, height, Color.Maroon);
             Fonts.DrawText("Pact effects (timed):", x + padding, y + padding, 20, Color.Gold);
             int line = 20;
@@ -700,7 +701,13 @@ namespace EchoesGame.Game
                 var e = active[i];
                 string name = e.Type switch { PactEffect.XPGain => "Greed Pact: +XP", PactEffect.EliteChance => "Greed Pact: +Elite chance", _ => "Effect" };
                 string txt = $"{name} {e.Strength*100:0}% — {e.Remaining:0.0}s";
-                Game.Fonts.DrawText(txt, x + padding, y + padding + line, 18, Color.RayWhite);
+                // progress fill (single red bar, full possible width, no inner lines)
+                float total = GetEffectTotalDuration(e.Type);
+                float frac = total <= 0f ? 0f : (e.Remaining / total);
+                if (frac < 0f) frac = 0f; if (frac > 1f) frac = 1f;
+                int rowTop = y + padding + line - 2;
+                Raylib.DrawRectangle(x + padding, rowTop, (int)(contentW * frac), rowH - 2, new Color(140, 0, 0, 100));
+                Game.Fonts.DrawText(txt, x + padding + 4, rowTop + 2, 18, Color.RayWhite);
                 line += rowH;
             }
         }
