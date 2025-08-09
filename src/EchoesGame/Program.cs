@@ -38,6 +38,7 @@ internal static class Program
         };
         bool paused = false;
         bool pactsMenuOpen = false;
+        float pactsMenuDebounce = 0f;
         bool gameOver = false;
         float elapsed = 0f;
         int score = 0;
@@ -53,8 +54,14 @@ internal static class Program
             if (Raylib.IsKeyPressed(KeyboardKey.P)) paused = !paused;
             if (!draftOpen && !pacts.Opened && !gameOver)
             {
-                if (Raylib.IsKeyPressed(KeyboardKey.O)) pactsMenuOpen = !pactsMenuOpen;
+                if (Raylib.IsKeyPressed(KeyboardKey.O))
+                {
+                    bool opening = !pactsMenuOpen;
+                    pactsMenuOpen = !pactsMenuOpen;
+                    if (opening) pactsMenuDebounce = 0.2f;
+                }
             }
+            if (pactsMenuDebounce > 0f) pactsMenuDebounce -= dt;
             if (paused || draftOpen || gameOver || pacts.Opened || pactsMenuOpen)
             {
                 // Draw only
@@ -99,7 +106,7 @@ internal static class Program
                 if (pactsMenuOpen)
                 {
                     Game.PactsMenuOverlay.Draw();
-                    if (Raylib.IsKeyPressed(KeyboardKey.O) || Raylib.IsKeyPressed(KeyboardKey.Escape))
+                    if (pactsMenuDebounce <= 0f && (Raylib.IsKeyPressed(KeyboardKey.O) || Raylib.IsKeyPressed(KeyboardKey.Escape)))
                     {
                         pactsMenuOpen = false;
                     }
@@ -559,7 +566,8 @@ namespace EchoesGame.Game
             int line = 0;
             int padding = 8;
             int contentW = width - padding * 2;
-            int height = padding * 2 + 20 + active.Count * 18;
+            int rowH = 22; // height to match red border spacing
+            int height = padding * 2 + 20 + active.Count * rowH;
             // Base background
             Raylib.DrawRectangle(x, y, width, height, new Color(60, 60, 60, 140));
             Raylib.DrawRectangleLines(x, y, width, height, Color.Maroon);
@@ -573,11 +581,12 @@ namespace EchoesGame.Game
                 float total = GetEffectTotalDuration(e.Type);
                 float frac = total <= 0f ? 0f : (e.Remaining / total);
                 if (frac < 0f) frac = 0f; if (frac > 1f) frac = 1f;
-                int barY = y + padding + line - 2;
-                // shrinking red fill from left to right
-                Raylib.DrawRectangle(x + padding, barY, (int)(contentW * frac), 18, new Color(140, 0, 0, 80));
-                Game.Fonts.DrawText(txt, x + padding + 4, y + padding + line, 16, Color.RayWhite);
-                line += 18;
+                int rowTop = y + padding + line - 2;
+                Raylib.DrawRectangleLines(x + padding - 2, rowTop - 2, contentW + 4, rowH, Color.Maroon);
+                // shrinking red fill from left to right, matching border height
+                Raylib.DrawRectangle(x + padding, rowTop, (int)(contentW * frac), rowH - 2, new Color(140, 0, 0, 80));
+                Game.Fonts.DrawText(txt, x + padding + 4, rowTop + 2, 16, Color.RayWhite);
+                line += rowH;
             }
         }
 
