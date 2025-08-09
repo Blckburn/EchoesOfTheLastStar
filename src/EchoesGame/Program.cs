@@ -132,6 +132,7 @@ internal static class Program
             elapsed += dt;
             player.TickDamageIFrames(dt);
             Game.PactRuntime.Update(dt);
+            Game.KeystoneRuntime.Update(dt);
             Game.FloatingTextSystem.Update(dt);
             player.Update(dt, projectilePool, camera);
             enemySpawner.Update(dt, player.Position, camera);
@@ -414,6 +415,7 @@ namespace EchoesGame.Game
         private static KeystoneType active;
         private static float remaining;
         private static bool activeFlag;
+        public static bool IsActiveDarkness => activeFlag && active == KeystoneType.Darkness;
         public static void Activate(KeystoneType type, float duration)
         {
             active = type; remaining = duration; activeFlag = true;
@@ -1561,7 +1563,13 @@ namespace EchoesGame.Game
                     if (!e.Alive) continue;
                     if (Raylib.CheckCollisionRecs(pb, e.GetBounds()))
                     {
-                        e.TakeDamage(p.Damage);
+                        float dmg = p.Damage;
+                        // Keystone Darkness: enemies take reduced damage
+                        if (KeystoneRuntime.IsActiveDarkness)
+                        {
+                            dmg *= 0.85f; // -15% damage taken
+                        }
+                        e.TakeDamage(dmg);
                         Game.FloatingTextSystem.Spawn(e.Position, $"{p.Damage:0}", Color.Yellow);
                         p.Active = false;
                         if (!e.Alive)
