@@ -36,6 +36,7 @@ internal static class Program
             Zoom = 1f
         };
         bool paused = false;
+        bool showPermanentPanel = false;
         bool gameOver = false;
         float elapsed = 0f;
         int score = 0;
@@ -49,6 +50,7 @@ internal static class Program
             float dt = Raylib.GetFrameTime();
 
             if (Raylib.IsKeyPressed(KeyboardKey.P)) paused = !paused;
+            if (Raylib.IsKeyPressed(KeyboardKey.O)) showPermanentPanel = !showPermanentPanel;
             if (paused || draftOpen || gameOver || pacts.Opened)
             {
                 // Draw only
@@ -62,8 +64,10 @@ internal static class Program
                 xpOrbs.Draw();
                 projectilePool.Draw();
                 player.Draw(camera);
+                Game.FloatingTextSystem.Draw();
                 Raylib.EndMode2D();
                 DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
+                if (paused || showPermanentPanel) Game.PactRuntime.DrawPermanentPanel(Raylib.GetScreenWidth() - 360 - 16, 16, 360);
                 if (draftOpen)
                 {
                     draft.Draw();
@@ -101,6 +105,7 @@ internal static class Program
             elapsed += dt;
             player.TickDamageIFrames(dt);
             Game.PactRuntime.Update(dt);
+            Game.FloatingTextSystem.Update(dt);
             player.Update(dt, projectilePool, camera);
             enemySpawner.Update(dt, player.Position, camera);
             projectilePool.Update(dt);
@@ -150,9 +155,11 @@ internal static class Program
             xpOrbs.Draw();
             projectilePool.Draw();
             player.Draw(camera);
+            Game.FloatingTextSystem.Draw();
             Raylib.EndMode2D();
 
             DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
+            if (paused || showPermanentPanel) Game.PactRuntime.DrawPermanentPanel(Raylib.GetScreenWidth() - 360 - 16, 16, 360);
             // Pact panel is drawn within DrawHud
             if (draftOpen) draft.Draw();
 
@@ -397,6 +404,7 @@ namespace EchoesGame.Game
         private static readonly List<ActiveEffect> active = new();
         private static float xpGainBonus = 0f;
         private static float eliteChanceBonus = 0f;
+        private static readonly List<string> permanent = new();
 
         public static float XPGainBonus => xpGainBonus; // 0.40 = +40%
         public static float EliteChanceBonus => eliteChanceBonus; // 0.20 = +20%
@@ -405,6 +413,11 @@ namespace EchoesGame.Game
         {
             active.Add(new ActiveEffect { Type = type, Remaining = duration, Strength = strength });
             RecomputeTotals();
+        }
+
+        public static void AddPermanent(string description)
+        {
+            permanent.Add(description);
         }
 
         public static void Update(float dt)
@@ -446,6 +459,23 @@ namespace EchoesGame.Game
                 string name = e.Type switch { PactEffect.XPGain => "Greed Pact: +XP", PactEffect.EliteChance => "Greed Pact: +Elite chance", _ => "Effect" };
                 string txt = $"{name} {e.Strength*100:0}% — {e.Remaining:0.0}s";
                 Raylib.DrawText(txt, x + padding, y + padding + line, 16, Color.RayWhite);
+                line += 18;
+            }
+        }
+
+        public static void DrawPermanentPanel(int x, int y, int width)
+        {
+            if (permanent.Count == 0) return;
+            int padding = 8;
+            int lines = permanent.Count;
+            int height = padding * 2 + 20 + lines * 18;
+            Raylib.DrawRectangle(x, y, width, height, new Color(60, 60, 60, 140));
+            Raylib.DrawRectangleLines(x, y, width, height, Color.DarkGray);
+            Raylib.DrawText("Permanent Pacts:", x + padding, y + padding, 18, Color.Gold);
+            int line = 20;
+            for (int i = 0; i < permanent.Count; i++)
+            {
+                Raylib.DrawText(permanent[i], x + padding, y + padding + line, 16, Color.RayWhite);
                 line += 18;
             }
         }
@@ -1089,17 +1119,20 @@ namespace EchoesGame.Game
                 player.ApplyMod(Player.ModType.ShootInterval);
                 // enemies faster
                 ModifyEnemies(spawner, speedMul: 1.15f);
+                PactRuntime.AddPermanent("Storm Pact: +20% fire rate, +15% enemy speed");
             }
             else if (choice == 1) // Stone Pact (permanent, heals to full and increases max HP)
             {
                 player.IncreaseMaxHPByPercent(0.20f, healToFull: true);
                 player.ApplyMod(Player.ModType.MoveSpeed); // then nerf move by 15%
                 player.PlayerSpeedMultiplier *= 0.85f;
+                PactRuntime.AddPermanent("Stone Pact: Heal to full, +20% Max HP, -15% move speed");
             }
             else if (choice == 2) // Blood Oath
             {
                 player.ApplyMod(Player.ModType.BulletDamage, 2); // +40% from mods, then nerf max HP
                 player.IncreaseMaxHPByPercent(-0.15f, healToFull: false);
+                PactRuntime.AddPermanent("Blood Oath: +25% bullet damage, -15% Max HP");
             }
             else if (choice == 3) // Greed Pact
             {
@@ -1110,6 +1143,7 @@ namespace EchoesGame.Game
             {
                 player.ApplyMod(Player.ModType.DashCooldown, 2); // -20%
                 ModifyEnemies(spawner, speedMul: 1.10f);
+                PactRuntime.AddPermanent("Time Bargain: -20% dash cooldown, +10% enemy speed");
             }
             Opened = false;
         }
