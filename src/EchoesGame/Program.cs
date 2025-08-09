@@ -28,6 +28,7 @@ internal static class Program
         var xpOrbs = new Game.XPOrbPool(capacity: 512);
         var draft = new Game.LevelUpDraft();
         var pacts = new Game.PactOverlay();
+        var boss = new Game.BossManager();
         bool draftOpen = false;
         var camera = new Camera2D
         {
@@ -46,6 +47,7 @@ internal static class Program
         EchoesGame.Infra.Analytics.Log("start_run", new System.Collections.Generic.Dictionary<string, object>());
         int lastPending = 0;
         float nextPactAt = 30f;
+        float nextBossAt = 240f; // first mini-boss at 4:00
 
         while (!Raylib.WindowShouldClose())
         {
@@ -133,9 +135,10 @@ internal static class Program
             Game.FloatingTextSystem.Update(dt);
             player.Update(dt, projectilePool, camera);
             enemySpawner.Update(dt, player.Position, camera);
+            boss.Update(dt, player.Position);
             projectilePool.Update(dt);
             xpOrbs.Update(dt, player.Position, xpSystem, player.XPMagnetMultiplier);
-            Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (enemy) => { xpOrbs.Spawn(enemy.Position, Raylib.GetRandomValue(1,2)); score += enemy.IsElite ? 25 : 10; });
+            Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (enemy) => { xpOrbs.Spawn(enemy.Position, Raylib.GetRandomValue(1,2)); score += enemy.IsElite ? 25 : 10; }, boss);
             // Apply dynamic bonuses from timed pacts
             if (Game.PactRuntime.EliteChanceBonus > 0f) enemySpawner.SetEliteChanceBonus(Game.PactRuntime.EliteChanceBonus); else enemySpawner.SetEliteChanceBonus(0f);
 
@@ -155,6 +158,13 @@ internal static class Program
                     player.TakeDamage(e.ContactDamage);
                 }
             }
+            if (boss.Alive)
+            {
+                if (Raylib.CheckCollisionRecs(new Rectangle(player.Position.X - 10, player.Position.Y - 10, 20, 20), boss.Bounds))
+                {
+                    player.TakeDamage(30f);
+                }
+            }
             if (player.IsDead) { gameOver = true; }
 
             if (!draftOpen && xpSystem.PendingChoices > 0)
@@ -167,6 +177,13 @@ internal static class Program
                 pacts.Open();
                 nextPactAt += 45f;
             }
+            // Boss spawn
+            if (!boss.Alive && elapsed >= nextBossAt)
+            {
+                boss.SpawnNear(camera);
+                Game.KeystoneRuntime.Activate((Game.KeystoneType)Raylib.GetRandomValue(0, 1), 35f);
+                nextBossAt += 180f;
+            }
 
             // Draw
             Raylib.BeginDrawing();
@@ -177,6 +194,7 @@ internal static class Program
             DrawFloorTiles();
             DrawWorldWalls();
             enemySpawner.Draw(player.Position);
+            boss.Draw();
             xpOrbs.Draw();
             projectilePool.Draw();
             player.Draw(camera);
@@ -191,6 +209,8 @@ internal static class Program
             int pyB = 12;
             Game.Fonts.DrawText(pactTxtB, pxB, pyB, 20, Color.Red);
             if (paused || pactsMenuOpen) Game.PactRuntime.DrawPermanentPanel(Raylib.GetScreenWidth() - 360 - 16, 16, 360);
+            Game.KeystoneRuntime.DrawOverlay();
+            boss.DrawBossHud();
             // Pact panel is drawn within DrawHud
             if (draftOpen) draft.Draw();
 
@@ -387,6 +407,86 @@ internal static class Program
 
 namespace EchoesGame.Game
 {
+    internal enum KeystoneType { GravityWell, Darkness }
+
+    internal static class KeystoneRuntime
+    {
+        private static KeystoneType active;
+        private static float remaining;
+        private static bool activeFlag;
+        public static void Activate(KeystoneType type, float duration)
+        {
+            active = type; remaining = duration; activeFlag = true;
+        }
+        public static void Update(float dt)
+        {
+            if (!activeFlag) return;
+            remaining -= dt; if (remaining <= 0f) { activeFlag = false; remaining = 0f; }
+        }
+        public static void DrawOverlay()
+        {
+            if (!activeFlag) return;
+            if (active == KeystoneType.Darkness)
+            {
+                Raylib.DrawRectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight(), new Color(0,0,0,100));
+            }
+            string txt = $"Keystone: {active} {remaining:0.0}s";
+            Fonts.DrawText(txt, 16, Raylib.GetScreenHeight() - 28, 20, Color.Gold);
+        }
+        public static Vector2 GetGravityForce(Vector2 pos)
+        {
+            if (!(activeFlag && active == KeystoneType.GravityWell)) return Vector2.Zero;
+            Vector2 toCenter = -pos; // world center at 0,0
+            float dist = MathF.Max(1f, toCenter.Length());
+            Vector2 dir = toCenter / dist;
+            float strength = MathF.Min(600f, 200000f / (dist*dist));
+            return dir * strength;
+        }
+    }
+
+    internal sealed class BossManager
+    {
+        public bool Alive => alive;
+        private bool alive;
+        public Vector2 Position;
+        public Rectangle Bounds => new Rectangle(Position.X - 32, Position.Y - 32, 64, 64);
+        private float hpMax = 800f;
+        private float hp;
+        public void SpawnNear(Camera2D camera)
+        {
+            float left = camera.Target.X - camera.Offset.X;
+            float top = camera.Target.Y - camera.Offset.Y;
+            Position = new Vector2(left + camera.Offset.X, top + camera.Offset.Y - 120);
+            hp = hpMax; alive = true;
+        }
+        public void Update(float dt, Vector2 playerPos)
+        {
+            if (!alive) return;
+            // gravity well affects player via KeystoneRuntime; boss chases slowly
+            Vector2 dir = playerPos - Position;
+            if (dir.LengthSquared() > 1e-4f) dir = Vector2.Normalize(dir);
+            Position += dir * 80f * dt;
+        }
+        public void Draw()
+        {
+            if (!alive) return;
+            var color = Color.Yellow;
+            Raylib.DrawCircleV(Position, 28f, new Color(255,255,0,180));
+            Raylib.DrawCircleLines((int)Position.X, (int)Position.Y, 32f, Color.Gold);
+        }
+        public void DrawBossHud()
+        {
+            if (!alive) return;
+            int w = 300; int h = 14; int x = (Raylib.GetScreenWidth()-w)/2; int y = 16;
+            Raylib.DrawRectangle(x, y, w, h, Color.DarkGray);
+            float n = MathF.Max(0f, hp) / hpMax; Raylib.DrawRectangle(x, y, (int)(w*n), h, Color.Red);
+            Fonts.DrawText("MINI-BOSS", x, y-18, 20, Color.Gold);
+        }
+        public void TakeDamage(float d)
+        {
+            if (!alive) return; hp -= d; if (hp <= 0f) { alive = false; FloatingTextSystem.Spawn(Position, "+XP", Color.Gold); }
+        }
+    }
     internal static class PactsMenuOverlay
     {
         public static void Draw()
@@ -1448,7 +1548,7 @@ namespace EchoesGame.Game
 
     internal static class Collision
     {
-        public static void Resolve(ProjectilePool projectiles, IReadOnlyList<Enemy> enemies, System.Action<Enemy>? onEnemyKilled = null)
+        public static void Resolve(ProjectilePool projectiles, IReadOnlyList<Enemy> enemies, System.Action<Enemy>? onEnemyKilled = null, BossManager? boss = null)
         {
             foreach (var p in projectiles.All())
             {
@@ -1469,6 +1569,13 @@ namespace EchoesGame.Game
                         }
                         break;
                     }
+                }
+                // Boss collision
+                if (boss != null && boss.Alive && Raylib.CheckCollisionRecs(pb, boss.Bounds))
+                {
+                    boss.TakeDamage(p.Damage);
+                    Game.FloatingTextSystem.Spawn(boss.Bounds.Position, $"{p.Damage:0}", Color.Orange);
+                    p.Active = false;
                 }
             }
         }
