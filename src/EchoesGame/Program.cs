@@ -62,6 +62,7 @@ internal static class Program
                 player.Draw(camera);
                 Raylib.EndMode2D();
                 DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
+                Game.PactRuntime.DrawHudTimer(16, 16 + 20 + 20 + 26 + 26 + 26);
                 if (draftOpen)
                 {
                     draft.Draw();
@@ -98,11 +99,14 @@ internal static class Program
             // Update
             elapsed += dt;
             player.TickDamageIFrames(dt);
+            Game.PactRuntime.Update(dt);
             player.Update(dt, projectilePool, camera);
             enemySpawner.Update(dt, player.Position, camera);
             projectilePool.Update(dt);
             xpOrbs.Update(dt, player.Position, xpSystem, player.XPMagnetMultiplier);
             Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (enemy) => { xpOrbs.Spawn(enemy.Position, Raylib.GetRandomValue(1,2)); score += enemy.IsElite ? 25 : 10; });
+            // Apply dynamic bonuses from timed pacts
+            if (Game.PactRuntime.EliteChanceBonus > 0f) enemySpawner.SetEliteChanceBonus(Game.PactRuntime.EliteChanceBonus); else enemySpawner.SetEliteChanceBonus(0f);
 
             // Heal on level up (10% max)
             if (xpSystem.PendingChoices > lastPending)
@@ -148,6 +152,8 @@ internal static class Program
             Raylib.EndMode2D();
 
             DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
+            // Pact timer HUD
+            Game.PactRuntime.DrawHudTimer(16, 16 + 20 + 20 + 26 + 26 + 26); // below existing bars
             if (draftOpen) draft.Draw();
 
             Raylib.EndDrawing();
@@ -339,10 +345,61 @@ internal static class Program
 
 namespace EchoesGame.Game
 {
-    using Raylib_cs;
-    using System.Numerics;
-    using System;
-    using System.Collections.Generic;
+    internal enum PactEffect { XPGain, EliteChance }
+
+    internal static class PactRuntime
+    {
+        private struct ActiveEffect { public PactEffect Type; public float Remaining; public float Strength; }
+        private static readonly List<ActiveEffect> active = new();
+        private static float xpGainBonus = 0f;
+        private static float eliteChanceBonus = 0f;
+
+        public static float XPGainBonus => xpGainBonus; // 0.40 = +40%
+        public static float EliteChanceBonus => eliteChanceBonus; // 0.20 = +20%
+
+        public static void ApplyTimed(PactEffect type, float duration, float strength)
+        {
+            active.Add(new ActiveEffect { Type = type, Remaining = duration, Strength = strength });
+            RecomputeTotals();
+        }
+
+        public static void Update(float dt)
+        {
+            for (int i = active.Count - 1; i >= 0; i--)
+            {
+                var e = active[i];
+                e.Remaining -= dt;
+                if (e.Remaining <= 0f) active.RemoveAt(i); else active[i] = e;
+            }
+            RecomputeTotals();
+        }
+
+        private static void RecomputeTotals()
+        {
+            xpGainBonus = 0f; eliteChanceBonus = 0f;
+            foreach (var e in active)
+            {
+                if (e.Type == PactEffect.XPGain) xpGainBonus += e.Strength;
+                else if (e.Type == PactEffect.EliteChance) eliteChanceBonus += e.Strength;
+            }
+        }
+
+        public static void DrawHudTimer(int x, int y)
+        {
+            if (active.Count == 0) return;
+            int line = 0;
+            Raylib.DrawText("Pact effects:", x, y, 18, Color.Gold);
+            line += 20;
+            foreach (var e in active)
+            {
+                string name = e.Type switch { PactEffect.XPGain => "+XP", PactEffect.EliteChance => "+EliteChance", _ => "Effect" };
+                string txt = $"{name} {e.Strength*100:0}% — {e.Remaining:0.0}s";
+                Raylib.DrawText(txt, x, y + line, 16, Color.RayWhite);
+                line += 18;
+            }
+        }
+    }
+    
 
     internal sealed class Player
     {
@@ -710,7 +767,8 @@ namespace EchoesGame.Game
 
         public void AddXP(int amount)
         {
-            CurrentXP += amount;
+            int bonus = amount + (int)MathF.Ceiling(amount * PactRuntime.XPGainBonus);
+            CurrentXP += Math.Max(amount, bonus);
             while (CurrentXP >= NextLevelXP)
             {
                 CurrentXP -= NextLevelXP;
@@ -894,8 +952,12 @@ namespace EchoesGame.Game
         private Rectangle[] rects = Array.Empty<Rectangle>();
         private string[] titles = new[] {
             "Storm Pact: +20% fire rate, +15% enemy speed",
-            "Stone Pact: +20% HP, -15% move speed"
+            "Stone Pact: +20% HP, -15% move speed",
+            "Blood Oath: +25% bullet damage, -15% max HP",
+            "Greed Pact: +40% XP gain, +20% elite chance",
+            "Time Bargain: -20% dash cooldown, +10% enemy speed"
         };
+        private int[] shown = Array.Empty<int>();
         public bool Opened { get; private set; }
 
         public void Open()
@@ -903,6 +965,8 @@ namespace EchoesGame.Game
             Opened = true;
             int x = 180; int y = 150; int w = 420; int h = 150; int gap = 40;
             rects = new[] { new Rectangle(x, y, w, h), new Rectangle(x + w + gap, y, w, h) };
+            // pick 2 out of titles
+            shown = ShufflePick(Enumerable.Range(0, titles.Length).ToArray(), 2);
         }
 
         public void Draw()
@@ -916,7 +980,8 @@ namespace EchoesGame.Game
                 var bg = hover ? new Color(140, 140, 140, 255) : new Color(90, 90, 90, 240);
                 Raylib.DrawRectangleRec(r, bg);
                 Raylib.DrawRectangleLinesEx(r, 2, hover ? Color.Gold : Color.Black);
-                DrawTextWrappedWithShadow($"{i+1}. {titles[i]}", r, 22, 6, Color.RayWhite);
+                int k = shown[i];
+                DrawTextWrappedWithShadow($"{i+1}. {titles[k]}", r, 22, 6, Color.RayWhite);
             }
         }
 
@@ -961,17 +1026,33 @@ namespace EchoesGame.Game
 
         public void Apply(int idx, ref Player player, EnemySpawner spawner)
         {
-            if (idx == 0)
+            int choice = shown[idx];
+            if (choice == 0) // Storm Pact
             {
                 player.ApplyMod(Player.ModType.ShootInterval);
                 // enemies faster
                 ModifyEnemies(spawner, speedMul: 1.15f);
             }
-            else if (idx == 1)
+            else if (choice == 1) // Stone Pact
             {
                 player.IncreaseMaxHPByPercent(0.20f, healToFull: true);
                 player.ApplyMod(Player.ModType.MoveSpeed); // then nerf move by 15%
                 player.PlayerSpeedMultiplier *= 0.85f;
+            }
+            else if (choice == 2) // Blood Oath
+            {
+                player.ApplyMod(Player.ModType.BulletDamage, 2); // +40% from mods, then nerf max HP
+                player.IncreaseMaxHPByPercent(-0.15f, healToFull: false);
+            }
+            else if (choice == 3) // Greed Pact
+            {
+                Game.PactRuntime.ApplyTimed(PactEffect.XPGain, duration: 30f, strength: 0.40f);
+                Game.PactRuntime.ApplyTimed(PactEffect.EliteChance, duration: 30f, strength: 0.20f);
+            }
+            else if (choice == 4) // Time Bargain
+            {
+                player.ApplyMod(Player.ModType.DashCooldown, 2); // -20%
+                ModifyEnemies(spawner, speedMul: 1.10f);
             }
             Opened = false;
         }
@@ -980,6 +1061,17 @@ namespace EchoesGame.Game
         {
             var list = (List<Enemy>)typeof(EnemySpawner).GetField("enemies", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(spawner)!;
             foreach (var e in list) e.Speed *= speedMul;
+        }
+
+        private static int[] ShufflePick(int[] arr, int count)
+        {
+            var rnd = new Random();
+            for (int i = arr.Length - 1; i > 0; i--)
+            {
+                int j = rnd.Next(i + 1);
+                (arr[i], arr[j]) = (arr[j], arr[i]);
+            }
+            return arr.Take(count).ToArray();
         }
     }
 
@@ -991,6 +1083,7 @@ namespace EchoesGame.Game
         private int maxAlive = 40;
         private float threat; // grows with time
         private int batchSize = 1;
+        private float eliteChanceBonus = 0f; // from timed pacts
 
         public IReadOnlyList<Enemy> Enemies => enemies;
         public int Count => enemies.Count;
@@ -1063,7 +1156,7 @@ namespace EchoesGame.Game
             };
             int tankChance = (int)MathF.Min(50, 20 + threat * 0.2f);
             int sprinterChance = (int)MathF.Min(40, 10 + threat * 0.15f);
-            int eliteChance = (int)MathF.Min(30, 5 + threat * 0.1f);
+            int eliteChance = (int)MathF.Min(30, 5 + threat * 0.1f + eliteChanceBonus * 100f);
             int roll = Raylib.GetRandomValue(0, 99);
             bool spawnTank = roll < tankChance;
             bool spawnSprinter = !spawnTank && roll < (tankChance + sprinterChance);
@@ -1090,6 +1183,11 @@ namespace EchoesGame.Game
                 e.MaxHP *= 1.5f; e.HP *= 1.5f;
             }
             enemies.Add(e);
+        }
+
+        public void SetEliteChanceBonus(float bonus)
+        {
+            eliteChanceBonus = MathF.Max(0f, bonus);
         }
     }
 
