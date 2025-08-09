@@ -29,6 +29,7 @@ internal static class Program
         var draft = new Game.LevelUpDraft();
         var pacts = new Game.PactOverlay();
         var boss = new Game.BossManager();
+        var bossShots = new Game.EnemyProjectilePool(256);
         bool draftOpen = false;
         var camera = new Camera2D
         {
@@ -136,8 +137,10 @@ internal static class Program
             Game.FloatingTextSystem.Update(dt);
             player.Update(dt, projectilePool, camera);
             enemySpawner.Update(dt, player.Position, camera);
+            boss.Update(dt, player.Position, bossShots);
             boss.Update(dt, player.Position);
             projectilePool.Update(dt);
+            bossShots.Update(dt, ref player);
             xpOrbs.Update(dt, player.Position, xpSystem, player.XPMagnetMultiplier);
             Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (enemy) => { xpOrbs.Spawn(enemy.Position, Raylib.GetRandomValue(1,2)); score += enemy.IsElite ? 25 : 10; }, boss);
             // Apply dynamic bonuses from timed pacts
@@ -198,6 +201,7 @@ internal static class Program
             boss.Draw();
             xpOrbs.Draw();
             projectilePool.Draw();
+            bossShots.Draw();
             player.Draw(camera);
             Game.FloatingTextSystem.Draw();
             Raylib.EndMode2D();
@@ -446,6 +450,39 @@ namespace EchoesGame.Game
         }
     }
 
+    internal sealed class EnemyProjectile
+    {
+        public Vector2 Position;
+        public Vector2 Velocity;
+        public bool Active;
+        private float lifetime = 3.0f;
+        public float Damage = 12f;
+        public void Reset(Vector2 p, Vector2 v, float dmg) { Position=p; Velocity=v; Damage=dmg; lifetime=3f; Active=true; }
+        public void Update(float dt, ref Player player)
+        {
+            if (!Active) return;
+            Position += Velocity * dt;
+            lifetime -= dt;
+            if (lifetime <= 0f) Active = false;
+            if (Raylib.CheckCollisionRecs(new Rectangle(player.Position.X-10, player.Position.Y-10,20,20), new Rectangle(Position.X-4, Position.Y-4,8,8)))
+            { player.TakeDamage(Damage); Active=false; }
+        }
+        public void Draw()
+        {
+            if (!Active) return; Raylib.DrawCircleV(Position, 3f, Color.Orange);
+        }
+    }
+
+    internal sealed class EnemyProjectilePool
+    {
+        private readonly EnemyProjectile[] pool;
+        private int next;
+        public EnemyProjectilePool(int capacity) { pool = new EnemyProjectile[capacity]; for(int i=0;i<capacity;i++) pool[i]=new EnemyProjectile(); }
+        public void Spawn(Vector2 p, Vector2 v, float dmg) { for(int i=0;i<pool.Length;i++){ next=(next+1)%pool.Length; if(!pool[next].Active){ pool[next].Reset(p,v,dmg); return; } } }
+        public void Update(float dt, ref Player player){ for(int i=0;i<pool.Length;i++) pool[i].Update(dt, ref player); }
+        public void Draw(){ for(int i=0;i<pool.Length;i++) pool[i].Draw(); }
+    }
+
     internal sealed class BossManager
     {
         public bool Alive => alive;
@@ -454,12 +491,15 @@ namespace EchoesGame.Game
         public Rectangle Bounds => new Rectangle(Position.X - 32, Position.Y - 32, 64, 64);
         private float hpMax = 800f;
         private float hp;
+        private float shootTimer;
+        private const float ShootInterval = 0.8f; // fan burst
         public void SpawnNear(Camera2D camera)
         {
             float left = camera.Target.X - camera.Offset.X;
             float top = camera.Target.Y - camera.Offset.Y;
             Position = new Vector2(left + camera.Offset.X, top + camera.Offset.Y - 120);
             hp = hpMax; alive = true;
+            shootTimer = 0f;
         }
         public void Update(float dt, Vector2 playerPos)
         {
@@ -468,6 +508,23 @@ namespace EchoesGame.Game
             Vector2 dir = playerPos - Position;
             if (dir.LengthSquared() > 1e-4f) dir = Vector2.Normalize(dir);
             Position += dir * 80f * dt;
+        }
+        public void Update(float dt, Vector2 playerPos, EnemyProjectilePool shots)
+        {
+            if (!alive) return; Update(dt, playerPos);
+            shootTimer += dt; if (shootTimer >= ShootInterval)
+            {
+                shootTimer = 0f;
+                // fire a 5-shot fan toward player
+                Vector2 to = playerPos - Position; if (to.LengthSquared()<1e-4f) to = new Vector2(1,0); to = Vector2.Normalize(to);
+                float baseAng = MathF.Atan2(to.Y, to.X);
+                for (int i=-2;i<=2;i++)
+                {
+                    float ang = baseAng + i * 0.12f;
+                    Vector2 v = new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * 220f;
+                    shots.Spawn(Position, v, 8f);
+                }
+            }
         }
         public void Draw()
         {
