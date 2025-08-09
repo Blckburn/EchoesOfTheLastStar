@@ -78,9 +78,12 @@ internal static class Program
                 Game.FloatingTextSystem.Draw();
                 Raylib.EndMode2D();
                 DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
-                // Next pact countdown
+                // Next pact countdown (top-right)
                 float pactRemainA = MathF.Max(0f, nextPactAt - elapsed);
-                Game.Fonts.DrawText($"Next Pact: {pactRemainA:0}s", 16, 16 + 22*3 + 28*3 + 6, 20, Color.Gold);
+                string pactTxtA = $"Next Pact: {pactRemainA:0}s";
+                int pxA = Raylib.GetScreenWidth() - 200;
+                int pyA = 12;
+                Game.Fonts.DrawText(pactTxtA, pxA, pyA, 20, Color.Red);
                 if (paused) Game.PactRuntime.DrawPermanentPanel(Raylib.GetScreenWidth() - 360 - 16, 16, 360);
                 if (draftOpen)
                 {
@@ -181,9 +184,12 @@ internal static class Program
             Raylib.EndMode2D();
 
             DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
-            // Next pact countdown
+            // Next pact countdown (top-right)
             float pactRemainB = MathF.Max(0f, nextPactAt - elapsed);
-            Game.Fonts.DrawText($"Next Pact: {pactRemainB:0}s", 16, 16 + 22*3 + 28*3 + 6, 20, Color.Gold);
+            string pactTxtB = $"Next Pact: {pactRemainB:0}s";
+            int pxB = Raylib.GetScreenWidth() - 200;
+            int pyB = 12;
+            Game.Fonts.DrawText(pactTxtB, pxB, pyB, 20, Color.Red);
             if (paused || pactsMenuOpen) Game.PactRuntime.DrawPermanentPanel(Raylib.GetScreenWidth() - 360 - 16, 16, 360);
             // Pact panel is drawn within DrawHud
             if (draftOpen) draft.Draw();
