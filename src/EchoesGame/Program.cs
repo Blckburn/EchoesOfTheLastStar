@@ -51,7 +51,10 @@ internal static class Program
             float dt = Raylib.GetFrameTime();
 
             if (Raylib.IsKeyPressed(KeyboardKey.P)) paused = !paused;
-            if (Raylib.IsKeyPressed(KeyboardKey.O)) pactsMenuOpen = !pactsMenuOpen;
+            if (!draftOpen && !pacts.Opened && !gameOver)
+            {
+                if (Raylib.IsKeyPressed(KeyboardKey.O)) pactsMenuOpen = !pactsMenuOpen;
+            }
             if (paused || draftOpen || gameOver || pacts.Opened || pactsMenuOpen)
             {
                 // Draw only
@@ -380,38 +383,56 @@ namespace EchoesGame.Game
             Raylib.DrawRectangleLines(x, y, panelW, panelH, Color.DarkGray);
 
             Fonts.DrawText("Pacts Overview (O to close)", x + 16, y + 12, 24, Color.Gold);
-            int cy = y + 44;
-            // Show permanent catalog with ownership/stacks
-            Fonts.DrawText("Permanent:", x + 16, cy, 20, Color.RayWhite); cy += 24;
+            int cy = y + 52;
+            int col = 2;
+            int gap = 16;
+            int cardW = (panelW - 16*2 - gap) / col;
+            int cardH = 100;
             var catalog = PactRuntime.GetPermanentCatalog();
             for (int i = 0; i < catalog.Count; i++)
             {
-                var entry = catalog[i];
-                bool owned = PactRuntime.HasPermanent(entry);
-                int stacks = PactRuntime.GetPermanentStacks(entry);
-                string label = owned && stacks > 1 ? $"{entry} x{stacks}" : entry;
-                var col = owned ? Color.RayWhite : new Color(160,160,160,200);
-                Fonts.DrawText("- "+label, x + 28, cy, 18, col);
-                cy += 20;
+                int row = i / col;
+                int c = i % col;
+                int cx = x + 16 + c * (cardW + gap);
+                int cyRow = cy + row * (cardH + gap);
+                var r = new Rectangle(cx, cyRow, cardW, cardH);
+                bool owned = PactRuntime.HasPermanent(catalog[i]);
+                int stacks = PactRuntime.GetPermanentStacks(catalog[i]);
+                var bg = owned ? new Color(80,80,80,240) : new Color(60,60,60,160);
+                Raylib.DrawRectangleRec(r, bg);
+                Raylib.DrawRectangleLinesEx(r, 2, owned ? Color.Gold : Color.DarkGray);
+                string label = owned && stacks > 1 ? $"{catalog[i]} x{stacks}" : catalog[i];
+                // Wrapped title
+                DrawTextWrapped(label, r, 18, 4, owned ? Color.RayWhite : new Color(180,180,180,220));
             }
-
-            cy += 10;
-            // Timed active effects
-            Fonts.DrawText("Timed (active):", x + 16, cy, 20, Color.RayWhite); cy += 24;
+            // Timed effects row
+            int timedY = cy + ((catalog.Count + (col-1))/col) * (cardH + gap) + 8;
+            Fonts.DrawText("Active timed effects:", x + 16, timedY, 20, Color.Gold);
             var actives = PactRuntime.GetActiveTimed();
-            if (actives.Count == 0)
+            int ty = timedY + 24;
+            for (int i = 0; i < actives.Count; i++)
             {
-                Fonts.DrawText("- none", x + 28, cy, 18, new Color(180,180,180,200));
+                var a = actives[i];
+                Fonts.DrawText($"- {a.Name} {a.Strength*100:0}% — {a.Remaining:0.0}s", x + 28, ty, 18, Color.RayWhite);
+                ty += 20;
             }
-            else
+        }
+
+        private static void DrawTextWrapped(string text, Rectangle bounds, int fontSize, int lineSpacing, Color color)
+        {
+            int margin = 8; int maxW = (int)bounds.Width - margin*2; int x = (int)bounds.X + margin; int y = (int)bounds.Y + margin;
+            string line = string.Empty; var words = text.Split(' ');
+            for (int wi = 0; wi < words.Length; wi++)
             {
-                for (int i = 0; i < actives.Count; i++)
+                string test = string.IsNullOrEmpty(line) ? words[wi] : line + " " + words[wi];
+                int width = Raylib.MeasureText(test, fontSize);
+                if (width > maxW)
                 {
-                    var a = actives[i];
-                    Fonts.DrawText($"- {a.Name} {a.Strength*100:0}% — {a.Remaining:0.0}s", x + 28, cy, 18, Color.RayWhite);
-                    cy += 20;
+                    Fonts.DrawText(line, x, y, fontSize, color); y += fontSize + lineSpacing; line = words[wi];
                 }
+                else line = test;
             }
+            if (!string.IsNullOrEmpty(line)) Fonts.DrawText(line, x, y, fontSize, color);
         }
     }
     internal static class Fonts
@@ -539,19 +560,30 @@ namespace EchoesGame.Game
             int padding = 8;
             int contentW = width - padding * 2;
             int height = padding * 2 + 20 + active.Count * 18;
-            // Background slightly red
-            Raylib.DrawRectangle(x, y, width, height, new Color(140, 0, 0, 80));
+            // Base background
+            Raylib.DrawRectangle(x, y, width, height, new Color(60, 60, 60, 140));
             Raylib.DrawRectangleLines(x, y, width, height, Color.Maroon);
-            Raylib.DrawText("Pact effects (timed):", x + padding, y + padding, 18, Color.Gold);
+            Fonts.DrawText("Pact effects (timed):", x + padding, y + padding, 18, Color.Gold);
             line += 20;
             for (int i = 0; i < active.Count; i++)
             {
                 var e = active[i];
                 string name = e.Type switch { PactEffect.XPGain => "Greed Pact: +XP", PactEffect.EliteChance => "Greed Pact: +Elite chance", _ => "Effect" };
                 string txt = $"{name} {e.Strength*100:0}% — {e.Remaining:0.0}s";
-                Game.Fonts.DrawText(txt, x + padding, y + padding + line, 16, Color.RayWhite);
+                float total = GetEffectTotalDuration(e.Type);
+                float frac = total <= 0f ? 0f : (e.Remaining / total);
+                if (frac < 0f) frac = 0f; if (frac > 1f) frac = 1f;
+                int barY = y + padding + line - 2;
+                // shrinking red fill from left to right
+                Raylib.DrawRectangle(x + padding, barY, (int)(contentW * frac), 18, new Color(140, 0, 0, 80));
+                Game.Fonts.DrawText(txt, x + padding + 4, y + padding + line, 16, Color.RayWhite);
                 line += 18;
             }
+        }
+
+        private static float GetEffectTotalDuration(PactEffect type)
+        {
+            return type switch { PactEffect.XPGain => 30f, PactEffect.EliteChance => 30f, _ => 30f };
         }
 
         public static void DrawPermanentPanel(int x, int y, int width)
