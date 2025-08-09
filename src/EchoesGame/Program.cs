@@ -1,5 +1,7 @@
 ﻿using Raylib_cs;
+using System;
 using System.Numerics;
+using System.Collections.Generic;
 using EchoesGame.Infra;
 using System.Linq;
 
@@ -62,7 +64,6 @@ internal static class Program
                 player.Draw(camera);
                 Raylib.EndMode2D();
                 DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
-                Game.PactRuntime.DrawHudTimer(16, 16 + 20 + 20 + 26 + 26 + 26);
                 if (draftOpen)
                 {
                     draft.Draw();
@@ -152,8 +153,7 @@ internal static class Program
             Raylib.EndMode2D();
 
             DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
-            // Pact timer HUD
-            Game.PactRuntime.DrawHudTimer(16, 16 + 20 + 20 + 26 + 26 + 26); // below existing bars
+            // Pact panel is drawn within DrawHud
             if (draftOpen) draft.Draw();
 
             Raylib.EndDrawing();
@@ -252,8 +252,9 @@ internal static class Program
         if (readiness < 0f) readiness = 0f; if (readiness > 1f) readiness = 1f;
         DrawBar(16, y + 6, 256, 16, readiness);
         y += 26;
-        // HP bar (red variant if present)
+        // HP bar (red variant if present) + numeric HP display
         DrawBar(16, y + 6, 256, 16, MathF.Max(0f, player.HP / player.MaxHP), "ui_bar_bg.png", TryHasRed() ? "ui_bar_fg_red.png" : "ui_bar_fg.png");
+        Raylib.DrawText($"HP: {player.HP:0}/{player.MaxHP:0}", 280, y, 18, Color.RayWhite);
         y += 26;
         // XP bar and level
         float xpNorm = xp.ProgressNormalized;
@@ -278,6 +279,9 @@ internal static class Program
                 Raylib.DrawText(line, 16, y, 16, Color.RayWhite); y += 18;
             }
         }
+        // Pact effects panel directly under Mods
+        y += 6;
+        Game.PactRuntime.DrawHudPanel(16, y, 360);
         if (paused)
         {
             Raylib.DrawText("PAUSED (P)", 16, y, 20, Color.Gold);
@@ -345,6 +349,46 @@ internal static class Program
 
 namespace EchoesGame.Game
 {
+    internal struct FloatingText
+    {
+        public Vector2 Position;
+        public string Text;
+        public Color Color;
+        public float Lifetime;
+        public float Age;
+    }
+
+    internal static class FloatingTextSystem
+    {
+        private static readonly List<FloatingText> items = new();
+        public static void Spawn(Vector2 pos, string text, Color color)
+        {
+            items.Add(new FloatingText { Position = pos, Text = text, Color = color, Lifetime = 0.8f, Age = 0f });
+        }
+        public static void Update(float dt)
+        {
+            for (int i = items.Count - 1; i >= 0; i--)
+            {
+                var it = items[i];
+                it.Age += dt;
+                it.Position.Y -= 40f * dt; // float up
+                items[i] = it;
+                if (it.Age >= it.Lifetime) items.RemoveAt(i);
+            }
+        }
+        public static void Draw()
+        {
+            for (int i = 0; i < items.Count; i++)
+            {
+                var it = items[i];
+                float a = MathF.Max(0f, 1f - it.Age / it.Lifetime);
+                var baseC = it.Color;
+                var c = new Color(baseC.R, baseC.G, baseC.B, (byte)(255 * a));
+                Raylib.DrawText(it.Text, (int)it.Position.X, (int)it.Position.Y, 18, c);
+            }
+        }
+        public static void Clear() { items.Clear(); }
+    }
     internal enum PactEffect { XPGain, EliteChance }
 
     internal static class PactRuntime
@@ -384,17 +428,24 @@ namespace EchoesGame.Game
             }
         }
 
-        public static void DrawHudTimer(int x, int y)
+        public static void DrawHudPanel(int x, int y, int width)
         {
             if (active.Count == 0) return;
             int line = 0;
-            Raylib.DrawText("Pact effects:", x, y, 18, Color.Gold);
+            int padding = 8;
+            int contentW = width - padding * 2;
+            int height = padding * 2 + 20 + active.Count * 18;
+            // Background slightly red
+            Raylib.DrawRectangle(x, y, width, height, new Color(140, 0, 0, 80));
+            Raylib.DrawRectangleLines(x, y, width, height, Color.Maroon);
+            Raylib.DrawText("Pact effects (timed):", x + padding, y + padding, 18, Color.Gold);
             line += 20;
-            foreach (var e in active)
+            for (int i = 0; i < active.Count; i++)
             {
-                string name = e.Type switch { PactEffect.XPGain => "+XP", PactEffect.EliteChance => "+EliteChance", _ => "Effect" };
+                var e = active[i];
+                string name = e.Type switch { PactEffect.XPGain => "Greed Pact: +XP", PactEffect.EliteChance => "Greed Pact: +Elite chance", _ => "Effect" };
                 string txt = $"{name} {e.Strength*100:0}% — {e.Remaining:0.0}s";
-                Raylib.DrawText(txt, x, y + line, 16, Color.RayWhite);
+                Raylib.DrawText(txt, x + padding, y + padding + line, 16, Color.RayWhite);
                 line += 18;
             }
         }
@@ -449,11 +500,15 @@ namespace EchoesGame.Game
             HP -= dmg;
             if (HP < 0f) HP = 0f;
             damageIFrames = 0.4f; // minimal tick between damage
+            // Player hit feedback
+            Game.FloatingTextSystem.Spawn(Position, $"-{dmg:0}", Color.Red);
         }
         public void TickDamageIFrames(float dt) { if (damageIFrames > 0f) damageIFrames -= dt; }
         public void HealPercent(float p)
         {
-            HP = MathF.Min(MaxHP, HP + MaxHP * p);
+            float heal = MaxHP * p;
+            HP = MathF.Min(MaxHP, HP + heal);
+            if (heal > 0f) Game.FloatingTextSystem.Spawn(Position, $"+{heal:0}", Color.Green);
         }
 
         public void IncreaseMaxHPByPercent(float percent, bool healToFull)
@@ -559,7 +614,8 @@ namespace EchoesGame.Game
                 var src = new Rectangle(0, 0, body.Width, body.Height);
                 var dst = new Rectangle(Position.X, Position.Y, body.Width, body.Height);
                 var origin = new Vector2(body.Width / 2f, body.Height / 2f);
-                Raylib.DrawTexturePro(body, src, dst, origin, angleDeg, Color.White);
+                var tint = damageIFrames > 0.2f ? new Color(255, 120, 120, 255) : Color.White; // brief red tint on recent hit
+                Raylib.DrawTexturePro(body, src, dst, origin, angleDeg, tint);
             }
             else
             {
@@ -751,6 +807,7 @@ namespace EchoesGame.Game
             HP -= dmg;
             hitFlash = 0.1f;
             if (HP <= 0f) Alive = false;
+            Game.FloatingTextSystem.Spawn(Position, $"-{dmg:0}", Color.Orange);
         }
     }
 
@@ -951,11 +1008,11 @@ namespace EchoesGame.Game
     {
         private Rectangle[] rects = Array.Empty<Rectangle>();
         private string[] titles = new[] {
-            "Storm Pact: +20% fire rate, +15% enemy speed",
-            "Stone Pact: +20% HP, -15% move speed",
-            "Blood Oath: +25% bullet damage, -15% max HP",
-            "Greed Pact: +40% XP gain, +20% elite chance",
-            "Time Bargain: -20% dash cooldown, +10% enemy speed"
+            "Storm Pact (permanent): +20% fire rate, +15% enemy speed",
+            "Stone Pact (permanent): Heal to full and +20% Max HP, -15% move speed",
+            "Blood Oath (permanent): +25% bullet damage, -15% Max HP",
+            "Greed Pact (30s): +40% XP gain, +20% elite chance",
+            "Time Bargain (permanent): -20% dash cooldown, +10% enemy speed"
         };
         private int[] shown = Array.Empty<int>();
         public bool Opened { get; private set; }
@@ -1033,7 +1090,7 @@ namespace EchoesGame.Game
                 // enemies faster
                 ModifyEnemies(spawner, speedMul: 1.15f);
             }
-            else if (choice == 1) // Stone Pact
+            else if (choice == 1) // Stone Pact (permanent, heals to full and increases max HP)
             {
                 player.IncreaseMaxHPByPercent(0.20f, healToFull: true);
                 player.ApplyMod(Player.ModType.MoveSpeed); // then nerf move by 15%
@@ -1206,6 +1263,7 @@ namespace EchoesGame.Game
                     if (Raylib.CheckCollisionRecs(pb, e.GetBounds()))
                     {
                         e.TakeDamage(p.Damage);
+                        Game.FloatingTextSystem.Spawn(e.Position, $"{p.Damage:0}", Color.Yellow);
                         p.Active = false;
                         if (!e.Alive)
                         {
