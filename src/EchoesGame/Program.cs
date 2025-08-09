@@ -209,7 +209,9 @@ internal static class Program
             if (!boss.Alive && elapsed >= nextBossAt)
             {
                 boss.SpawnNear(camera);
-                Game.KeystoneRuntime.Activate((Game.KeystoneType)Raylib.GetRandomValue(0, 1), 35f);
+                var k = (Game.KeystoneType)Raylib.GetRandomValue(0, 1);
+                Game.KeystoneRuntime.Activate(k, 35f);
+                if (k == Game.KeystoneType.GravityWell) Game.KeystoneRuntime.SetGravityAnchor(boss.Position);
                 nextBossAt += 180f;
             }
 
@@ -444,10 +446,14 @@ namespace EchoesGame.Game
         private static float remaining;
         private static bool activeFlag;
         public static bool IsActiveDarkness => activeFlag && active == KeystoneType.Darkness;
+        private static Vector2 gravityAnchor = Vector2.Zero;
+        private static bool gravityToBoss = false;
         public static void Activate(KeystoneType type, float duration)
         {
-            active = type; remaining = duration; activeFlag = true;
+            active = type; remaining = duration; activeFlag = true; gravityToBoss = false; gravityAnchor = Vector2.Zero;
         }
+        public static void SetGravityAnchor(Vector2 pos)
+        { gravityAnchor = pos; gravityToBoss = true; }
         public static void Update(float dt)
         {
             if (!activeFlag) return;
@@ -466,7 +472,8 @@ namespace EchoesGame.Game
         public static Vector2 GetGravityForce(Vector2 pos)
         {
             if (!(activeFlag && active == KeystoneType.GravityWell)) return Vector2.Zero;
-            Vector2 toCenter = -pos; // world center at 0,0
+            Vector2 target = gravityToBoss ? gravityAnchor : Vector2.Zero;
+            Vector2 toCenter = target - pos;
             float dist = MathF.Max(1f, toCenter.Length());
             Vector2 dir = toCenter / dist;
             float strength = MathF.Min(600f, 200000f / (dist*dist));
@@ -771,7 +778,7 @@ namespace EchoesGame.Game
             if (active.Count == 0) return;
             int padding = 8;
             int rowH = 22;
-            int contentW = width - padding * 2;
+            int contentW = width - 4; // fill almost the entire panel width
             int height = padding * 2 + 20 + active.Count * rowH;
             // Neutral backdrop + border
             Raylib.DrawRectangle(x, y, width, height, new Color(60, 60, 60, 140));
@@ -788,8 +795,9 @@ namespace EchoesGame.Game
                 float frac = total <= 0f ? 0f : (e.Remaining / total);
                 if (frac < 0f) frac = 0f; if (frac > 1f) frac = 1f;
                 int rowTop = y + padding + line - 2;
-                Raylib.DrawRectangle(x + padding, rowTop, (int)(contentW * frac), rowH - 2, new Color(140, 0, 0, 100));
-                Game.Fonts.DrawText(txt, x + padding + 4, rowTop + 2, 18, Color.RayWhite);
+                int left = x + 2; // inside border
+                Raylib.DrawRectangle(left, rowTop, (int)(contentW * frac), rowH - 2, new Color(140, 0, 0, 100));
+                Game.Fonts.DrawText(txt, x + padding, rowTop + 2, 18, Color.RayWhite);
                 line += rowH;
             }
         }
