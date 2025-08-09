@@ -50,9 +50,23 @@ internal static class Program
         float nextPactAt = 30f;
         float nextBossAt = 60f; // first mini-boss at 1:00 for testing
 
+        float slowMoTimer = 0f;
+        // Reward on boss death: big XP burst + brief slow-mo and score bonus
+        boss.OnDeath = (Vector2 pos) => {
+            for (int i = 0; i < 16; i++)
+            {
+                float ox = Raylib.GetRandomValue(-60, 60);
+                float oy = Raylib.GetRandomValue(-60, 60);
+                xpOrbs.Spawn(new Vector2(pos.X + ox, pos.Y + oy), Raylib.GetRandomValue(3, 6));
+            }
+            score += 250;
+            slowMoTimer = 0.6f;
+        };
         while (!Raylib.WindowShouldClose())
         {
-            float dt = Raylib.GetFrameTime();
+            float dtRaw = Raylib.GetFrameTime();
+            if (slowMoTimer > 0f) { slowMoTimer -= dtRaw; if (slowMoTimer < 0f) slowMoTimer = 0f; }
+            float dt = slowMoTimer > 0f ? dtRaw * 0.4f : dtRaw;
 
             if (Raylib.IsKeyPressed(KeyboardKey.P)) paused = !paused;
             if (!draftOpen && !pacts.Opened && !gameOver)
@@ -138,7 +152,6 @@ internal static class Program
             player.Update(dt, projectilePool, camera);
             enemySpawner.Update(dt, player.Position, camera);
             boss.Update(dt, player.Position, bossShots);
-            boss.Update(dt, player.Position);
             projectilePool.Update(dt);
             bossShots.Update(dt, ref player);
             xpOrbs.Update(dt, player.Position, xpSystem, player.XPMagnetMultiplier);
@@ -157,10 +170,21 @@ internal static class Program
             foreach (var e in enemySpawner.Enemies)
             {
                 if (!e.Alive) continue;
+                // GravityWell pull on enemies
+                Vector2 gf = Game.KeystoneRuntime.GetGravityForce(e.Position);
+                e.Position += gf * dt * 0.5f; // apply gentle pull
                 if (Raylib.CheckCollisionRecs(new Rectangle(player.Position.X - 10, player.Position.Y - 10, 20, 20), e.GetBounds()))
                 {
                     player.TakeDamage(e.ContactDamage);
                 }
+            }
+            // GravityWell pull on player
+            Vector2 gfp = Game.KeystoneRuntime.GetGravityForce(player.Position);
+            if (gfp.LengthSquared() > 0f)
+            {
+                // simulate pull: modify position directly for now
+                typeof(Game.Player).GetProperty("Position", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)!
+                    .SetValue(player, (Vector2)typeof(Game.Player).GetProperty("Position", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)!.GetValue(player)! + gfp * dt * 0.35f);
             }
             if (boss.Alive)
             {
@@ -455,7 +479,7 @@ namespace EchoesGame.Game
         public Vector2 Position;
         public Vector2 Velocity;
         public bool Active;
-        private float lifetime = 3.0f;
+        private float lifetime = 6.0f;
         public float Damage = 12f;
         public void Reset(Vector2 p, Vector2 v, float dmg) { Position=p; Velocity=v; Damage=dmg; lifetime=3f; Active=true; }
         public void Update(float dt, ref Player player)
@@ -464,12 +488,12 @@ namespace EchoesGame.Game
             Position += Velocity * dt;
             lifetime -= dt;
             if (lifetime <= 0f) Active = false;
-            if (Raylib.CheckCollisionRecs(new Rectangle(player.Position.X-10, player.Position.Y-10,20,20), new Rectangle(Position.X-4, Position.Y-4,8,8)))
+            if (Raylib.CheckCollisionRecs(new Rectangle(player.Position.X-10, player.Position.Y-10,20,20), new Rectangle(Position.X-6, Position.Y-6,12,12)))
             { player.TakeDamage(Damage); Active=false; }
         }
         public void Draw()
         {
-            if (!Active) return; Raylib.DrawCircleV(Position, 3f, Color.Orange);
+            if (!Active) return; Raylib.DrawCircleV(Position, 5f, Color.Orange);
         }
     }
 
@@ -492,7 +516,8 @@ namespace EchoesGame.Game
         private float hpMax = 800f;
         private float hp;
         private float shootTimer;
-        private const float ShootInterval = 0.8f; // fan burst
+        private const float ShootInterval = 0.7f; // fan burst
+        public Action<Vector2>? OnDeath;
         public void SpawnNear(Camera2D camera)
         {
             float left = camera.Target.X - camera.Offset.X;
@@ -520,8 +545,8 @@ namespace EchoesGame.Game
                 float baseAng = MathF.Atan2(to.Y, to.X);
                 for (int i=-2;i<=2;i++)
                 {
-                    float ang = baseAng + i * 0.12f;
-                    Vector2 v = new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * 220f;
+                    float ang = baseAng + i * 0.11f;
+                    Vector2 v = new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * 320f;
                     shots.Spawn(Position, v, 8f);
                 }
             }
@@ -553,7 +578,7 @@ namespace EchoesGame.Game
         }
         public void TakeDamage(float d)
         {
-            if (!alive) return; hp -= d; if (hp <= 0f) { alive = false; FloatingTextSystem.Spawn(Position, "+XP", Color.Gold); }
+            if (!alive) return; hp -= d; if (hp <= 0f) { alive = false; FloatingTextSystem.Spawn(Position, "+XP", Color.Gold); OnDeath?.Invoke(Position); }
         }
     }
     internal static class PactsMenuOverlay
