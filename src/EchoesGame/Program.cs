@@ -685,30 +685,20 @@ namespace EchoesGame.Game
         public static void DrawHudPanel(int x, int y, int width)
         {
             if (active.Count == 0) return;
-            int line = 0;
             int padding = 8;
-            int contentW = width - 4; // use full panel width minus thin border
-            int rowH = 22; // height to match red border spacing
+            int rowH = 22;
             int height = padding * 2 + 20 + active.Count * rowH;
-            // Base background
-            Raylib.DrawRectangle(x, y, width, height, new Color(60, 60, 60, 140));
+            // Solid red background (single piece) with red border
+            Raylib.DrawRectangle(x, y, width, height, new Color(140, 0, 0, 100));
             Raylib.DrawRectangleLines(x, y, width, height, Color.Maroon);
             Fonts.DrawText("Pact effects (timed):", x + padding, y + padding, 20, Color.Gold);
-            line += 20;
+            int line = 20;
             for (int i = 0; i < active.Count; i++)
             {
                 var e = active[i];
                 string name = e.Type switch { PactEffect.XPGain => "Greed Pact: +XP", PactEffect.EliteChance => "Greed Pact: +Elite chance", _ => "Effect" };
                 string txt = $"{name} {e.Strength*100:0}% — {e.Remaining:0.0}s";
-                float total = GetEffectTotalDuration(e.Type);
-                float frac = total <= 0f ? 0f : (e.Remaining / total);
-                if (frac < 0f) frac = 0f; if (frac > 1f) frac = 1f;
-                int left = x + 2;
-                int rowTop = y + padding + line - 2;
-                Raylib.DrawRectangleLines(left - 2, rowTop - 2, contentW + 4, rowH, Color.Maroon);
-                // shrinking red fill from left to right, full row width inside thin border
-                Raylib.DrawRectangle(left, rowTop, (int)(contentW * frac), rowH - 2, new Color(140, 0, 0, 80));
-                Game.Fonts.DrawText(txt, left + 4, rowTop + 2, 16, Color.RayWhite);
+                Game.Fonts.DrawText(txt, x + padding, y + padding + line, 18, Color.RayWhite);
                 line += rowH;
             }
         }
