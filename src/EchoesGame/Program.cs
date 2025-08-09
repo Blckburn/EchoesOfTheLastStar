@@ -19,6 +19,7 @@ internal static class Program
         Raylib.SetTargetFPS(TargetFps);
         Raylib.SetMouseCursor(MouseCursor.Crosshair);
         EchoesGame.Infra.Assets.Init(System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "textures"));
+        Game.Fonts.Init(System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "fonts", "ui_font.ttf"));
 
         var player = new Game.Player(new Vector2(0, 0));
         var enemySpawner = new Game.EnemySpawner();
@@ -36,7 +37,7 @@ internal static class Program
             Zoom = 1f
         };
         bool paused = false;
-        bool showPermanentPanel = false;
+        bool pactsMenuOpen = false;
         bool gameOver = false;
         float elapsed = 0f;
         int score = 0;
@@ -50,8 +51,8 @@ internal static class Program
             float dt = Raylib.GetFrameTime();
 
             if (Raylib.IsKeyPressed(KeyboardKey.P)) paused = !paused;
-            if (Raylib.IsKeyPressed(KeyboardKey.O)) showPermanentPanel = !showPermanentPanel;
-            if (paused || draftOpen || gameOver || pacts.Opened)
+            if (Raylib.IsKeyPressed(KeyboardKey.O)) pactsMenuOpen = !pactsMenuOpen;
+            if (paused || draftOpen || gameOver || pacts.Opened || pactsMenuOpen)
             {
                 // Draw only
                 Raylib.BeginDrawing();
@@ -67,7 +68,7 @@ internal static class Program
                 Game.FloatingTextSystem.Draw();
                 Raylib.EndMode2D();
                 DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
-                if (paused || showPermanentPanel) Game.PactRuntime.DrawPermanentPanel(Raylib.GetScreenWidth() - 360 - 16, 16, 360);
+                if (paused) Game.PactRuntime.DrawPermanentPanel(Raylib.GetScreenWidth() - 360 - 16, 16, 360);
                 if (draftOpen)
                 {
                     draft.Draw();
@@ -90,6 +91,14 @@ internal static class Program
                     {
                         int i = pacts.HitTest(Raylib.GetMousePosition());
                         if (i >= 0) pacts.Apply(i, ref player, enemySpawner);
+                    }
+                }
+                if (pactsMenuOpen)
+                {
+                    Game.PactsMenuOverlay.Draw();
+                    if (Raylib.IsKeyPressed(KeyboardKey.O) || Raylib.IsKeyPressed(KeyboardKey.Escape))
+                    {
+                        pactsMenuOpen = false;
                     }
                 }
                 if (gameOver)
@@ -159,7 +168,7 @@ internal static class Program
             Raylib.EndMode2D();
 
             DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
-            if (paused || showPermanentPanel) Game.PactRuntime.DrawPermanentPanel(Raylib.GetScreenWidth() - 360 - 16, 16, 360);
+            if (paused || pactsMenuOpen) Game.PactRuntime.DrawPermanentPanel(Raylib.GetScreenWidth() - 360 - 16, 16, 360);
             // Pact panel is drawn within DrawHud
             if (draftOpen) draft.Draw();
 
@@ -251,9 +260,9 @@ internal static class Program
     private static void DrawHud(Game.Player player, bool paused, int bullets, int enemies, Game.XPSystem xp, float elapsedSeconds = 0f, int score = 0)
     {
         int y = 16;
-        Raylib.DrawText($"FPS: {Raylib.GetFPS()}  Time: {elapsedSeconds:0}s  Score: {score}", 16, y, 18, Color.RayWhite); y += 20;
-        Raylib.DrawText($"Dash CD: {player.DashCooldownRemaining:0.00}s", 16, y, 18, Color.RayWhite); y += 20;
-        Raylib.DrawText($"Bullets: {bullets}  Enemies: {enemies}", 16, y, 18, Color.RayWhite); y += 20;
+            Game.Fonts.DrawText($"FPS: {Raylib.GetFPS()}  Time: {elapsedSeconds:0}s  Score: {score}", 16, y, 18, Color.RayWhite); y += 20;
+            Game.Fonts.DrawText($"Dash CD: {player.DashCooldownRemaining:0.00}s", 16, y, 18, Color.RayWhite); y += 20;
+            Game.Fonts.DrawText($"Bullets: {bullets}  Enemies: {enemies}", 16, y, 18, Color.RayWhite); y += 20;
         // Dash readiness bar (0..1)
         float readiness = 1f - (player.DashCooldownRemaining / player.DashCooldownTotal);
         if (readiness < 0f) readiness = 0f; if (readiness > 1f) readiness = 1f;
@@ -261,17 +270,17 @@ internal static class Program
         y += 26;
         // HP bar (red variant if present) + numeric HP display
         DrawBar(16, y + 6, 256, 16, MathF.Max(0f, player.HP / player.MaxHP), "ui_bar_bg.png", TryHasRed() ? "ui_bar_fg_red.png" : "ui_bar_fg.png");
-        Raylib.DrawText($"HP: {player.HP:0}/{player.MaxHP:0}", 280, y, 18, Color.RayWhite);
+        Game.Fonts.DrawText($"HP: {player.HP:0}/{player.MaxHP:0}", 280, y, 18, Color.RayWhite);
         y += 26;
         // XP bar and level
         float xpNorm = xp.ProgressNormalized;
         DrawBar(16, y + 6, 256, 16, xpNorm);
-        Raylib.DrawText($"LVL: {xp.Level}", 280, y, 18, Color.RayWhite);
+        Game.Fonts.DrawText($"LVL: {xp.Level}", 280, y, 18, Color.RayWhite);
         y += 26;
         // Active modifiers (stacked, per line)
         if (player.ModStacks.Count > 0)
         {
-            Raylib.DrawText("Mods:", 16, y, 18, Color.RayWhite); y += 20;
+            Game.Fonts.DrawText("Mods:", 16, y, 18, Color.RayWhite); y += 20;
             foreach (var kv in player.ModStacks)
             {
                 string line = kv.Key switch {
@@ -283,7 +292,7 @@ internal static class Program
                     Game.Player.ModType.DashCooldown => $"-{kv.Value*10}% dash cooldown",
                     _ => $"x{kv.Value}"
                 };
-                Raylib.DrawText(line, 16, y, 16, Color.RayWhite); y += 18;
+                Game.Fonts.DrawText(line, 16, y, 16, Color.RayWhite); y += 18;
             }
         }
         // Pact effects panel directly under Mods
@@ -291,7 +300,7 @@ internal static class Program
         Game.PactRuntime.DrawHudPanel(16, y, 360);
         if (paused)
         {
-            Raylib.DrawText("PAUSED (P)", 16, y, 20, Color.Gold);
+            Game.Fonts.DrawText("PAUSED (P)", 16, y, 20, Color.Gold);
         }
     }
 
@@ -356,6 +365,78 @@ internal static class Program
 
 namespace EchoesGame.Game
 {
+    internal static class PactsMenuOverlay
+    {
+        public static void Draw()
+        {
+            // Dim background + panel centered
+            int w = Raylib.GetScreenWidth();
+            int h = Raylib.GetScreenHeight();
+            Raylib.DrawRectangle(0, 0, w, h, new Color(0,0,0,160));
+            int panelW = Math.Min(900, (int)(w * 0.8));
+            int panelH = Math.Min(540, (int)(h * 0.8));
+            int x = (w - panelW)/2; int y = (h - panelH)/2;
+            Raylib.DrawRectangle(x, y, panelW, panelH, new Color(40,40,40,220));
+            Raylib.DrawRectangleLines(x, y, panelW, panelH, Color.DarkGray);
+
+            Fonts.DrawText("Pacts Overview (O to close)", x + 16, y + 12, 24, Color.Gold);
+            int cy = y + 44;
+            // Show permanent catalog with ownership/stacks
+            Fonts.DrawText("Permanent:", x + 16, cy, 20, Color.RayWhite); cy += 24;
+            var catalog = PactRuntime.GetPermanentCatalog();
+            for (int i = 0; i < catalog.Count; i++)
+            {
+                var entry = catalog[i];
+                bool owned = PactRuntime.HasPermanent(entry);
+                int stacks = PactRuntime.GetPermanentStacks(entry);
+                string label = owned && stacks > 1 ? $"{entry} x{stacks}" : entry;
+                var col = owned ? Color.RayWhite : new Color(160,160,160,200);
+                Fonts.DrawText("- "+label, x + 28, cy, 18, col);
+                cy += 20;
+            }
+
+            cy += 10;
+            // Timed active effects
+            Fonts.DrawText("Timed (active):", x + 16, cy, 20, Color.RayWhite); cy += 24;
+            var actives = PactRuntime.GetActiveTimed();
+            if (actives.Count == 0)
+            {
+                Fonts.DrawText("- none", x + 28, cy, 18, new Color(180,180,180,200));
+            }
+            else
+            {
+                for (int i = 0; i < actives.Count; i++)
+                {
+                    var a = actives[i];
+                    Fonts.DrawText($"- {a.Name} {a.Strength*100:0}% — {a.Remaining:0.0}s", x + 28, cy, 18, Color.RayWhite);
+                    cy += 20;
+                }
+            }
+        }
+    }
+    internal static class Fonts
+    {
+        private static Font? uiFont;
+        public static void Init(string fontPath)
+        {
+            if (System.IO.File.Exists(fontPath))
+            {
+                uiFont = Raylib.LoadFontEx(fontPath, 32, null, 0);
+                // No direct texture field access; DrawTextEx will handle filtering adequately
+            }
+        }
+        public static void DrawText(string text, int x, int y, int size, Color color)
+        {
+            if (uiFont.HasValue)
+            {
+                Raylib.DrawTextEx(uiFont.Value, text, new Vector2(x, y), size, 1, color);
+            }
+            else
+            {
+                Raylib.DrawText(text, x, y, size, color);
+            }
+        }
+    }
     internal struct FloatingText
     {
         public Vector2 Position;
@@ -370,7 +451,7 @@ namespace EchoesGame.Game
         private static readonly List<FloatingText> items = new();
         public static void Spawn(Vector2 pos, string text, Color color)
         {
-            items.Add(new FloatingText { Position = pos, Text = text, Color = color, Lifetime = 0.8f, Age = 0f });
+            items.Add(new FloatingText { Position = pos, Text = text, Color = color, Lifetime = 1.1f, Age = 0f });
         }
         public static void Update(float dt)
         {
@@ -378,7 +459,7 @@ namespace EchoesGame.Game
             {
                 var it = items[i];
                 it.Age += dt;
-                it.Position.Y -= 40f * dt; // float up
+                it.Position.Y -= 48f * dt; // float up faster
                 items[i] = it;
                 if (it.Age >= it.Lifetime) items.RemoveAt(i);
             }
@@ -391,7 +472,7 @@ namespace EchoesGame.Game
                 float a = MathF.Max(0f, 1f - it.Age / it.Lifetime);
                 var baseC = it.Color;
                 var c = new Color(baseC.R, baseC.G, baseC.B, (byte)(255 * a));
-                Raylib.DrawText(it.Text, (int)it.Position.X, (int)it.Position.Y, 18, c);
+                Game.Fonts.DrawText(it.Text, (int)it.Position.X, (int)it.Position.Y, 22, c);
             }
         }
         public static void Clear() { items.Clear(); }
@@ -400,11 +481,19 @@ namespace EchoesGame.Game
 
     internal static class PactRuntime
     {
+        public struct TimedView { public string Name; public float Strength; public float Remaining; }
         private struct ActiveEffect { public PactEffect Type; public float Remaining; public float Strength; }
         private static readonly List<ActiveEffect> active = new();
         private static float xpGainBonus = 0f;
         private static float eliteChanceBonus = 0f;
         private static readonly List<string> permanent = new();
+        private static readonly Dictionary<string, int> permanentStacks = new();
+        private static readonly string[] allPermanentCatalog = new[] {
+            "Storm Pact: +20% fire rate, +15% enemy speed",
+            "Stone Pact: Heal to full, +20% Max HP, -15% move speed",
+            "Blood Oath: +25% bullet damage, -15% Max HP",
+            "Time Bargain: -20% dash cooldown, +10% enemy speed"
+        };
 
         public static float XPGainBonus => xpGainBonus; // 0.40 = +40%
         public static float EliteChanceBonus => eliteChanceBonus; // 0.20 = +20%
@@ -418,6 +507,8 @@ namespace EchoesGame.Game
         public static void AddPermanent(string description)
         {
             permanent.Add(description);
+            if (!permanentStacks.ContainsKey(description)) permanentStacks[description] = 0;
+            permanentStacks[description] += 1;
         }
 
         public static void Update(float dt)
@@ -458,26 +549,44 @@ namespace EchoesGame.Game
                 var e = active[i];
                 string name = e.Type switch { PactEffect.XPGain => "Greed Pact: +XP", PactEffect.EliteChance => "Greed Pact: +Elite chance", _ => "Effect" };
                 string txt = $"{name} {e.Strength*100:0}% — {e.Remaining:0.0}s";
-                Raylib.DrawText(txt, x + padding, y + padding + line, 16, Color.RayWhite);
+                Game.Fonts.DrawText(txt, x + padding, y + padding + line, 16, Color.RayWhite);
                 line += 18;
             }
         }
 
         public static void DrawPermanentPanel(int x, int y, int width)
         {
-            if (permanent.Count == 0) return;
             int padding = 8;
-            int lines = permanent.Count;
+            int lines = Math.Max(1, allPermanentCatalog.Length);
             int height = padding * 2 + 20 + lines * 18;
             Raylib.DrawRectangle(x, y, width, height, new Color(60, 60, 60, 140));
             Raylib.DrawRectangleLines(x, y, width, height, Color.DarkGray);
-            Raylib.DrawText("Permanent Pacts:", x + padding, y + padding, 18, Color.Gold);
+            Fonts.DrawText("Permanent Pacts:", x + padding, y + padding, 18, Color.Gold);
             int line = 20;
-            for (int i = 0; i < permanent.Count; i++)
+            for (int i = 0; i < allPermanentCatalog.Length; i++)
             {
-                Raylib.DrawText(permanent[i], x + padding, y + padding + line, 16, Color.RayWhite);
+                string text = allPermanentCatalog[i];
+                bool owned = permanentStacks.ContainsKey(text);
+                int stacks = owned ? permanentStacks[text] : 0;
+                string label = owned && stacks > 1 ? $"{text} x{stacks}" : text;
+                var color = owned ? Color.RayWhite : new Color(180,180,180,200);
+                Fonts.DrawText(label, x + padding, y + padding + line, 16, color);
                 line += 18;
             }
+        }
+
+        public static List<string> GetPermanentCatalog() => allPermanentCatalog.ToList();
+        public static bool HasPermanent(string label) => permanentStacks.ContainsKey(label);
+        public static int GetPermanentStacks(string label) => permanentStacks.TryGetValue(label, out var s) ? s : 0;
+        public static List<TimedView> GetActiveTimed()
+        {
+            var list = new List<TimedView>();
+            foreach (var e in active)
+            {
+                string name = e.Type switch { PactEffect.XPGain => "Greed Pact: +XP", PactEffect.EliteChance => "Greed Pact: +Elite chance", _ => "Effect" };
+                list.Add(new TimedView { Name = name, Strength = e.Strength, Remaining = e.Remaining });
+            }
+            return list;
         }
     }
     
@@ -917,6 +1026,8 @@ namespace EchoesGame.Game
             "Bullets travel faster", "Fire more frequently", "Bullets deal more damage",
             "Player moves faster", "XP orbs pull from farther", "Dash cooldown reduced" };
         private Rectangle[] cardRects = Array.Empty<Rectangle>();
+        private static Font? cachedFont => FontsFontRef;
+        private static Font? FontsFontRef;
 
         public void Open()
         {
@@ -939,8 +1050,8 @@ namespace EchoesGame.Game
                 Raylib.DrawRectangleRec(r, bg);
                 Raylib.DrawRectangleLinesEx(r, 2, hover ? Color.Gold : Color.Black);
                 int k = shown[i];
-                Raylib.DrawText($"{i+1}. {titles[k]}", (int)r.X + 12, (int)r.Y + 12, 20, Color.RayWhite);
-                Raylib.DrawText(descs[k], (int)r.X + 12, (int)r.Y + 44, 18, Color.RayWhite);
+                Fonts.DrawText($"{i+1}. {titles[k]}", (int)r.X + 12, (int)r.Y + 12, 20, Color.RayWhite);
+                Fonts.DrawText(descs[k], (int)r.X + 12, (int)r.Y + 44, 18, Color.RayWhite);
             }
         }
 
@@ -1087,10 +1198,10 @@ namespace EchoesGame.Game
                 if (width > maxWidth)
                 {
                     // draw current line
-                    // shadow
-                    Raylib.DrawText(line, x + 1, y + 1, fontSize, Color.Black);
-                    // main
-                    Raylib.DrawText(line, x, y, fontSize, color);
+                // shadow
+                Game.Fonts.DrawText(line, x + 1, y + 1, fontSize, Color.Black);
+                // main
+                Game.Fonts.DrawText(line, x, y, fontSize, color);
                     y += fontSize + lineSpacing;
                     line = words[wi];
                 }
@@ -1101,8 +1212,8 @@ namespace EchoesGame.Game
             }
             if (!string.IsNullOrEmpty(line))
             {
-                Raylib.DrawText(line, x + 1, y + 1, fontSize, Color.Black);
-                Raylib.DrawText(line, x, y, fontSize, color);
+                Game.Fonts.DrawText(line, x + 1, y + 1, fontSize, Color.Black);
+                Game.Fonts.DrawText(line, x, y, fontSize, color);
             }
         }
 
