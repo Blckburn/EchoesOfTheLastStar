@@ -470,9 +470,19 @@ namespace EchoesGame.Game
         public void Draw()
         {
             if (!alive) return;
-            var color = Color.Yellow;
-            Raylib.DrawCircleV(Position, 28f, new Color(255,255,0,180));
-            Raylib.DrawCircleLines((int)Position.X, (int)Position.Y, 32f, Color.Gold);
+            // Use tank texture scaled x2 and tinted yellow
+            if (Assets.TryGet("enemy_tank.png", out var tex))
+            {
+                var src = new Rectangle(0, 0, tex.Width, tex.Height);
+                var dst = new Rectangle(Position.X, Position.Y, tex.Width * 2f, tex.Height * 2f);
+                var origin = new Vector2(tex.Width, tex.Height);
+                Raylib.DrawTexturePro(tex, src, dst, origin, 0, new Color(255, 255, 0, 230));
+            }
+            else
+            {
+                Raylib.DrawCircleV(Position, 28f, new Color(255,255,0,180));
+                Raylib.DrawCircleLines((int)Position.X, (int)Position.Y, 32f, Color.Gold);
+            }
         }
         public void DrawBossHud()
         {
@@ -677,7 +687,7 @@ namespace EchoesGame.Game
             if (active.Count == 0) return;
             int line = 0;
             int padding = 8;
-            int contentW = width - padding * 2;
+            int contentW = width - 4; // use full panel width minus thin border
             int rowH = 22; // height to match red border spacing
             int height = padding * 2 + 20 + active.Count * rowH;
             // Base background
@@ -693,11 +703,12 @@ namespace EchoesGame.Game
                 float total = GetEffectTotalDuration(e.Type);
                 float frac = total <= 0f ? 0f : (e.Remaining / total);
                 if (frac < 0f) frac = 0f; if (frac > 1f) frac = 1f;
+                int left = x + 2;
                 int rowTop = y + padding + line - 2;
-                Raylib.DrawRectangleLines(x + padding - 2, rowTop - 2, contentW + 4, rowH, Color.Maroon);
-                // shrinking red fill from left to right, matching border height
-                Raylib.DrawRectangle(x + padding, rowTop, (int)(contentW * frac), rowH - 2, new Color(140, 0, 0, 80));
-                Game.Fonts.DrawText(txt, x + padding + 4, rowTop + 2, 16, Color.RayWhite);
+                Raylib.DrawRectangleLines(left - 2, rowTop - 2, contentW + 4, rowH, Color.Maroon);
+                // shrinking red fill from left to right, full row width inside thin border
+                Raylib.DrawRectangle(left, rowTop, (int)(contentW * frac), rowH - 2, new Color(140, 0, 0, 80));
+                Game.Fonts.DrawText(txt, left + 4, rowTop + 2, 16, Color.RayWhite);
                 line += rowH;
             }
         }
