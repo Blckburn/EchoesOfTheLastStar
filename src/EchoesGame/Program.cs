@@ -52,7 +52,7 @@ internal static class Program
 
         float slowMoTimer = 0f;
         // Reward on boss death: big XP burst + brief slow-mo and score bonus
-        boss.OnDeath = (Vector2 pos) => {
+            boss.OnDeath = (Vector2 pos) => {
             for (int i = 0; i < 16; i++)
             {
                 float ox = Raylib.GetRandomValue(-60, 60);
@@ -61,6 +61,7 @@ internal static class Program
             }
             score += 250;
             slowMoTimer = 0.6f;
+                Infra.Analytics.Log("boss_kill", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()}});
         };
         while (!Raylib.WindowShouldClose())
         {
@@ -199,7 +200,14 @@ internal static class Program
                     player.TakeDamage(30f);
                 }
             }
-            if (player.IsDead) { gameOver = true; }
+            if (player.IsDead)
+            {
+                if (!gameOver)
+                {
+                    Infra.Analytics.Log("death", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()},{"cause", player.LastDamageCause}});
+                }
+                gameOver = true;
+            }
 
             if (!draftOpen && xpSystem.PendingChoices > 0)
             {
@@ -218,6 +226,7 @@ internal static class Program
                 var k = (Game.KeystoneType)Raylib.GetRandomValue(0, 1);
                 Game.KeystoneRuntime.Activate(k, 35f);
                 if (k == Game.KeystoneType.GravityWell) Game.KeystoneRuntime.SetGravityAnchor(boss.Position);
+                Infra.Analytics.Log("boss_spawn", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()}});
                 nextBossAt += 180f;
             }
 
@@ -962,7 +971,9 @@ namespace EchoesGame.Game
             damageIFrames = 0.4f; // minimal tick between damage
             // Player hit feedback
             Game.FloatingTextSystem.Spawn(Position, $"{dmg:0}", Color.Red);
+            LastDamageCause = "hit";
         }
+        public string LastDamageCause { get; private set; } = "unknown";
         public void ApplyExternalForce(Vector2 force, float scale)
         {
             Position += force * scale;
@@ -1028,6 +1039,7 @@ namespace EchoesGame.Game
                     isDashing = true;
                     dashTimer = 0f;
                     dashDirection = input.LengthSquared() < 1e-5f ? new Vector2(1, 0) : Vector2.Normalize(input);
+                    Infra.Analytics.Log("dash", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()},{"x", Position.X},{"y", Position.Y}});
                 }
 
                 dashCooldownTimer += dt;
@@ -1299,6 +1311,7 @@ namespace EchoesGame.Game
                 Level++;
                 NextLevelXP = (int)(NextLevelXP * 1.20f + 1);
                 PendingChoices++;
+                Infra.Analytics.Log("level_up", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()},{"level", Level}});
             }
         }
 
@@ -1461,6 +1474,7 @@ namespace EchoesGame.Game
                 if (Raylib.CheckCollisionRecs(o.GetBounds(10f), new Rectangle(playerPos.X - 8, playerPos.Y - 8, 16, 16)))
                 {
                     xp.AddXP(o.Amount);
+                    Infra.Analytics.Log("xp_pickup", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()},{"amt", o.Amount}});
                     o.Active = false;
                 }
             }
@@ -1622,12 +1636,12 @@ namespace EchoesGame.Game
         {
             timer += dt;
             threat += dt;
-            // escalation
-            interval = MathF.Max(0.4f, 1.2f - threat * 0.01f);
-            maxAlive = 30 + (int)MathF.Min(70, threat * 0.8f);
-            batchSize = (threat > 30f) ? 2 : 1;
-            if (threat > 60f) batchSize = 3;
-            if (threat > 90f) batchSize = 4;
+            // escalation (smoother growth)
+            interval = MathF.Max(0.5f, 1.25f - threat * 0.009f);
+            maxAlive = 28 + (int)MathF.Min(72, threat * 0.75f);
+            batchSize = (threat > 36f) ? 2 : 1;
+            if (threat > 72f) batchSize = 3;
+            if (threat > 108f) batchSize = 4;
 
             if (timer >= interval && enemies.Count < maxAlive)
             {
@@ -1746,6 +1760,7 @@ namespace EchoesGame.Game
                         p.Active = false;
                         if (!e.Alive)
                         {
+                            Infra.Analytics.Log("enemy_kill", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()}});
                             onEnemyKilled?.Invoke(e);
                         }
                         break;
@@ -1754,6 +1769,7 @@ namespace EchoesGame.Game
                 // Boss collision
                 if (boss != null && boss.Alive && Raylib.CheckCollisionRecs(pb, boss.Bounds))
                 {
+                    Infra.Analytics.Log("projectile_hit_boss", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()}});
                     boss.TakeDamage(p.Damage);
                     Game.FloatingTextSystem.Spawn(boss.Bounds.Position, $"{p.Damage:0}", Color.Orange);
                     p.Active = false;
