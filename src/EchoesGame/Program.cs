@@ -176,7 +176,7 @@ internal static class Program
                 if (!e.Alive) continue;
                 // GravityWell pull on enemies
                 Vector2 gf = Game.KeystoneRuntime.GetGravityForce(e.Position);
-                e.Position += gf * dt * 0.5f; // apply gentle pull
+                if (gf.LengthSquared() > 0f) e.Position += gf * dt * 0.9f; // stronger pull
                 if (Raylib.CheckCollisionRecs(new Rectangle(player.Position.X - 10, player.Position.Y - 10, 20, 20), e.GetBounds()))
                 {
                     player.TakeDamage(e.ContactDamage);
@@ -184,7 +184,7 @@ internal static class Program
             }
             // GravityWell pull on player
             Vector2 gfp = Game.KeystoneRuntime.GetGravityForce(player.Position);
-            if (gfp.LengthSquared() > 0f) player.ApplyExternalForce(gfp, dt * 0.45f);
+            if (gfp.LengthSquared() > 0f) player.ApplyExternalForce(gfp, dt * 0.70f);
             if (boss.Alive)
             {
                 if (Raylib.CheckCollisionRecs(new Rectangle(player.Position.X - 10, player.Position.Y - 10, 20, 20), boss.Bounds))
@@ -358,7 +358,7 @@ internal static class Program
                 string line = kv.Key switch {
                     Game.Player.ModType.BulletSpeed => $"+{kv.Value*15}% bullet speed",
                     Game.Player.ModType.ShootInterval => $"+{kv.Value*10}% attack speed",
-                    Game.Player.ModType.BulletDamage => $"+{kv.Value*20}% bullet damage",
+                    Game.Player.ModType.BulletDamage => $"+{kv.Value*20}% damage",
                     Game.Player.ModType.MoveSpeed => $"+{kv.Value*10}% move speed",
                     Game.Player.ModType.XPMagnet => $"+{kv.Value*20}% XP magnet",
                     Game.Player.ModType.DashCooldown => $"-{kv.Value*10}% dash cooldown",
@@ -476,7 +476,11 @@ namespace EchoesGame.Game
             Vector2 toCenter = target - pos;
             float dist = MathF.Max(1f, toCenter.Length());
             Vector2 dir = toCenter / dist;
-            float strength = MathF.Min(600f, 200000f / (dist*dist));
+            // Stronger, longer falloff: 1/dist with additive bands
+            float strength = 1400f * (1f / dist);
+            if (dist < 700f) strength += 220f;
+            if (dist < 350f) strength += 200f;
+            strength = MathF.Min(1400f, strength);
             return dir * strength;
         }
     }
@@ -692,7 +696,17 @@ namespace EchoesGame.Game
         private static readonly List<FloatingText> items = new();
         public static void Spawn(Vector2 pos, string text, Color color)
         {
-            items.Add(new FloatingText { Position = pos, Text = text, Color = color, Lifetime = 1.1f, Age = 0f });
+            Vector2 p = pos;
+            for (int i = 0; i < items.Count; i++)
+            {
+                var it = items[i];
+                float d2 = Vector2.DistanceSquared(it.Position, p);
+                if (d2 < 18f * 18f)
+                {
+                    p.Y -= 18f;
+                }
+            }
+            items.Add(new FloatingText { Position = p, Text = text, Color = color, Lifetime = 1.1f, Age = 0f });
         }
         public static void Update(float dt)
         {
@@ -713,7 +727,7 @@ namespace EchoesGame.Game
                 float a = MathF.Max(0f, 1f - it.Age / it.Lifetime);
                 var baseC = it.Color;
                 var c = new Color(baseC.R, baseC.G, baseC.B, (byte)(255 * a));
-                Game.Fonts.DrawText(it.Text, (int)it.Position.X, (int)it.Position.Y, 22, c);
+                Game.Fonts.DrawText(it.Text, (int)it.Position.X, (int)it.Position.Y, 24, c);
             }
         }
         public static void Clear() { items.Clear(); }
@@ -1280,10 +1294,10 @@ namespace EchoesGame.Game
     internal sealed class LevelUpDraft
     {
         private readonly string[] titles = new[] {
-            "+15% bullet speed", "+10% attack speed", "+20% bullet damage",
+            "+15% bullet speed", "+10% attack speed", "+20% damage",
             "+10% move speed", "+20% XP magnet", "-10% dash cooldown" };
         private readonly string[] descs = new[] {
-            "Bullets travel faster", "Shoot faster (higher APS)", "Bullets deal more damage",
+            "Bullets travel faster", "Shoot faster (higher APS)", "Increase overall damage",
             "Player moves faster", "XP orbs pull from farther", "Dash cooldown reduced" };
         private Rectangle[] cardRects = Array.Empty<Rectangle>();
         private static Font? cachedFont => FontsFontRef;
@@ -1411,7 +1425,7 @@ namespace EchoesGame.Game
         private string[] titles = new[] {
             "Storm Pact (permanent): +20% fire rate, +15% enemy speed",
             "Stone Pact (permanent): Heal to full and +20% Max HP, -15% move speed",
-            "Blood Oath (permanent): +25% bullet damage, -15% Max HP",
+            "Blood Oath (permanent): +40% damage, -15% Max HP",
             "Greed Pact (30s): +40% XP gain, +20% elite chance",
             "Time Bargain (permanent): -20% dash cooldown, +10% enemy speed"
         };
