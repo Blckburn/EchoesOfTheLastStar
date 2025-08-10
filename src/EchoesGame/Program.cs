@@ -442,6 +442,13 @@ internal static class Program
         Game.WeaponPickupSystem.Reset();
         nextPactAt = 30f;
         nextBossAt = 60f;
+        Game.PactRuntime.ResetAll();
+        Game.KeystoneRuntime.Reset();
+        // reset spawner threat
+        typeof(Game.EnemySpawner).GetField("threat", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(spawner, 0f);
+        typeof(Game.EnemySpawner).GetField("timer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(spawner, 0f);
     }
 
     private static void DrawBar(int x, int y, int width, int height, float normalized, string barBg = "ui_bar_bg.png", string barFg = "ui_bar_fg.png")
@@ -605,6 +612,7 @@ namespace EchoesGame.Game
             strength = MathF.Min(700f * 1.28f, strength);
             return dir * strength;
         }
+        public static void Reset(){ activeFlag=false; remaining=0f; gravityToBoss=false; gravityAnchor=Vector2.Zero; }
     }
 
     internal sealed class EnemyProjectile
@@ -1023,6 +1031,10 @@ namespace EchoesGame.Game
         public static List<string> GetPermanentCatalog() => allPermanentCatalog.ToList();
         public static bool HasPermanent(string label) => permanentStacks.ContainsKey(label);
         public static int GetPermanentStacks(string label) => permanentStacks.TryGetValue(label, out var s) ? s : 0;
+        public static void ResetAll()
+        {
+            active.Clear(); xpGainBonus = 0f; eliteChanceBonus = 0f;
+        }
         public static List<TimedView> GetActiveTimed()
         {
             var list = new List<TimedView>();
@@ -1380,7 +1392,11 @@ namespace EchoesGame.Game
                         harpoonTelegraphActive = true;
                         harpoonTelegraphTimer = 0f;
                         harpoonFrom = Position;
-                        harpoonTo = target;
+                        // precompute dash destination with capped distance
+                        Vector2 to = target - Position;
+                        float d = to.Length(); if (d > 1e-5f) to /= d; else to = new Vector2(1,0);
+                        float dashDist = MathF.Min(160f, d);
+                        harpoonTo = harpoonFrom + to * dashDist;
                     }
                 }
                 if (harpoonTelegraphActive)
@@ -1388,15 +1404,8 @@ namespace EchoesGame.Game
                     harpoonTelegraphTimer += dt;
                     if (harpoonTelegraphTimer >= HarpoonTelegraphDuration)
                     {
-                        // perform dash
-                        Vector2 dashDir = harpoonTo - harpoonFrom;
-                        float d = dashDir.Length();
-                        if (d > 1e-5f)
-                        {
-                            dashDir /= d;
-                            float dashDist = MathF.Min(160f, d);
-                            Position = harpoonFrom + dashDir * dashDist;
-                        }
+                        // perform dash to precomputed destination
+                        Position = harpoonTo;
                         harpoonTelegraphActive = false;
                         harpoonCooldown = 2.4f + (Raylib.GetRandomValue(0, 120) / 100f); // ~2.4–3.6s
                     }
