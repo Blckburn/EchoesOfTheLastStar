@@ -177,6 +177,7 @@ internal static class Program
             bossShots.Update(dt, ref player);
             xpOrbs.Update(dt, player.Position, xpSystem, player.XPMagnetMultiplier);
             orbitals.Update(dt, player.Position, enemySpawner.Enemies);
+            Game.WeaponPickupSystem.Update(dt, ref player, orbitals);
             Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (enemy) => { xpOrbs.Spawn(enemy.Position, Raylib.GetRandomValue(1,2)); score += enemy.IsElite ? 25 : 10; }, boss);
             // Apply dynamic bonuses from timed pacts
             if (Game.PactRuntime.EliteChanceBonus > 0f) enemySpawner.SetEliteChanceBonus(Game.PactRuntime.EliteChanceBonus); else enemySpawner.SetEliteChanceBonus(0f);
@@ -515,7 +516,7 @@ namespace EchoesGame.Game
         public static void EnsureBossDrop(Vector2 bossPos)
         {
             if (orbitalDropped) return;
-            pickup = new Rectangle(bossPos.X, bossPos.Y, 18, 18);
+            pickup = new Rectangle(bossPos.X - 9, bossPos.Y - 9, 18, 18);
             orbitalDropped = true;
         }
         public static void Update(float dt, ref Player player, OrbitalsSystem orbitals)
@@ -523,7 +524,7 @@ namespace EchoesGame.Game
             if (pickup.HasValue)
             {
                 var r = pickup.Value;
-                var pr = new Rectangle(player.Position.X-10, player.Position.Y-10, 20, 20);
+                var pr = new Rectangle(player.Position.X-14, player.Position.Y-14, 28, 28);
                 if (Raylib.CheckCollisionRecs(r, pr))
                 {
                     orbitals.Unlock();
