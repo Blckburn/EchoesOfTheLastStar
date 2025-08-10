@@ -278,6 +278,7 @@ internal static class Program
             bossShots.Draw();
             orbitals.Draw();
             player.Draw(camera);
+            Game.XPVacuumRuntime.DrawWorld(player.Position);
             Game.FloatingTextSystem.Draw();
             Game.KeystoneRuntime.DrawOverlayWorld();
             Raylib.EndMode2D();
@@ -518,6 +519,28 @@ namespace EchoesGame.Game
         public static float Multiplier => remaining>0f ? 2.5f : 1f;
         public static void Activate(float duration){ remaining = MathF.Max(remaining, duration); }
         public static void Update(float dt){ if (remaining>0f) remaining -= dt; }
+        public static bool Active => remaining>0f;
+        public static float Remaining => MathF.Max(0f, remaining);
+        public static void DrawHudRow(int x, int y, int width, int padding, int rowH, int contentW, ref int line)
+        {
+            float total = 8f; // current fixed duration
+            float frac = MathF.Min(1f, Remaining / total);
+            int rowTop = y + padding + line - 2;
+            int left = x + 2;
+            Raylib.DrawRectangle(left, rowTop, contentW, rowH - 2, new Color(0, 0, 0, 120));
+            Raylib.DrawRectangle(left, rowTop, (int)(contentW * frac), rowH - 2, new Color(60, 120, 255, 200));
+            string txt = $"XP Vacuum — {Remaining:0.0}s";
+            Game.Fonts.DrawText(txt, x + padding + 3, rowTop + 3, 18, Color.Black);
+            Game.Fonts.DrawText(txt, x + padding + 2, rowTop + 2, 18, Color.RayWhite);
+            line += rowH;
+        }
+        public static void DrawWorld(Vector2 playerPos)
+        {
+            if (!Active) return;
+            // draw two subtle rings around player to echo gravity well style
+            Raylib.DrawCircleLines((int)playerPos.X, (int)playerPos.Y, 48f, new Color(120,200,255,160));
+            Raylib.DrawCircleLines((int)playerPos.X, (int)playerPos.Y, 90f, new Color(120,200,255,110));
+        }
     }
     internal sealed class OrbitalsSystem
     {
@@ -1067,11 +1090,12 @@ namespace EchoesGame.Game
 
         public static void DrawHudPanel(int x, int y, int width)
         {
-            if (active.Count == 0) return;
+            int extra = XPVacuumRuntime.Active ? 1 : 0;
+            if (active.Count + extra == 0) return;
             int padding = 8;
             int rowH = 22;
             int contentW = width - 4; // want full bar width inside outer border
-            int height = padding * 2 + 20 + active.Count * rowH;
+            int height = padding * 2 + 20 + (active.Count + extra) * rowH;
             // Full opaque gray backdrop, then black translucent underlay for the bar area
             Raylib.DrawRectangle(x, y, width, height, new Color(80, 80, 80, 255));
             Raylib.DrawRectangleLines(x, y, width, height, Color.Maroon);
@@ -1098,6 +1122,11 @@ namespace EchoesGame.Game
                 Game.Fonts.DrawText(txt, x + padding + 3, rowTop + 3, 18, Color.Black);
                 Game.Fonts.DrawText(txt, x + padding + 2, rowTop + 2, 18, Color.Yellow);
                 line += rowH;
+            }
+            // XP Vacuum row (blue bar)
+            if (XPVacuumRuntime.Active)
+            {
+                XPVacuumRuntime.DrawHudRow(x, y, width, padding, rowH, contentW, ref line);
             }
         }
 
