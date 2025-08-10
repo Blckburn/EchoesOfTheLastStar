@@ -61,9 +61,9 @@ internal static class Program
                 float oy = Raylib.GetRandomValue(-60, 60);
                 xpOrbs.Spawn(new Vector2(pos.X + ox, pos.Y + oy), Raylib.GetRandomValue(3, 6));
             }
-                // small chance to drop large/epic XP crystals
-                if (Raylib.GetRandomValue(0,99) < 70) xpOrbs.Spawn(pos + new Vector2(20,0), 20, Game.XPOrbType.Large);
-                if (Raylib.GetRandomValue(0,99) < 40) xpOrbs.Spawn(pos + new Vector2(-20,0), 50, Game.XPOrbType.Epic);
+                // chance to drop large/epic XP crystals (buffed)
+                if (Raylib.GetRandomValue(0,99) < 85) xpOrbs.Spawn(pos + new Vector2(20,0), 20, Game.XPOrbType.Large);
+                if (Raylib.GetRandomValue(0,99) < 80) xpOrbs.Spawn(pos + new Vector2(-20,0), 50, Game.XPOrbType.Epic);
                 Game.WeaponPickupSystem.TrySpawnVacuum(pos + new Vector2(0,24));
             score += 250;
             slowMoTimer = 0.6f;
@@ -187,8 +187,8 @@ internal static class Program
             Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (enemy) => {
                 // Base XP
                 xpOrbs.Spawn(enemy.Position, Raylib.GetRandomValue(1,2));
-                // Chance for large XP from elites
-                if (enemy.IsElite && Raylib.GetRandomValue(0,99) < 18) xpOrbs.Spawn(enemy.Position + new Vector2(10,0), 10, Game.XPOrbType.Large);
+                // Chance for large XP from elites (buffed x1.5)
+                if (enemy.IsElite && Raylib.GetRandomValue(0,99) < 27) xpOrbs.Spawn(enemy.Position + new Vector2(10,0), 10, Game.XPOrbType.Large);
                 if (enemy.IsElite) Game.WeaponPickupSystem.TrySpawnVacuum(enemy.Position);
                 score += enemy.IsElite ? 25 : 10;
             }, boss);
@@ -311,6 +311,7 @@ internal static class Program
             Raylib.EndDrawing();
         }
 
+        xpOrbs.LogStats();
         EchoesGame.Infra.Assets.Dispose();
         Raylib.CloseWindow();
     }
@@ -1100,8 +1101,8 @@ namespace EchoesGame.Game
             Raylib.DrawRectangle(x, y, width, height, new Color(80, 80, 80, 255));
             Raylib.DrawRectangleLines(x, y, width, height, Color.Maroon);
             // Title with slight outline
-            Fonts.DrawText("Pact effects (timed):", x + padding + 1, y + padding + 1, 20, Color.Black);
-            Fonts.DrawText("Pact effects (timed):", x + padding, y + padding, 20, Color.Gold);
+            Fonts.DrawText("Timed effects:", x + padding + 1, y + padding + 1, 20, Color.Black);
+            Fonts.DrawText("Timed effects:", x + padding, y + padding, 20, Color.Gold);
             int line = 20;
             for (int i = 0; i < active.Count; i++)
             {
@@ -1782,6 +1783,9 @@ namespace EchoesGame.Game
     {
         private readonly XPOrb[] pool;
         private int next;
+        private int droppedNormal;
+        private int droppedLarge;
+        private int droppedEpic;
 
         public XPOrbPool(int capacity)
         {
@@ -1800,6 +1804,7 @@ namespace EchoesGame.Game
                     pool[next].Position = pos;
                     pool[next].Amount = amount;
                     pool[next].Type = type;
+                    if (type==XPOrbType.Normal) droppedNormal++; else if (type==XPOrbType.Large) droppedLarge++; else droppedEpic++;
                     return;
                 }
             }
@@ -1832,6 +1837,10 @@ namespace EchoesGame.Game
         public void Draw()
         {
             for (int i = 0; i < pool.Length; i++) pool[i].Draw();
+        }
+        public void LogStats()
+        {
+            Infra.Analytics.Log("xp_orb_stats", new System.Collections.Generic.Dictionary<string, object>{{"normal", droppedNormal},{"large", droppedLarge},{"epic", droppedEpic}});
         }
     }
 
