@@ -184,9 +184,6 @@ internal static class Program
             foreach (var e in enemySpawner.Enemies)
             {
                 if (!e.Alive) continue;
-                // GravityWell pull on enemies
-                Vector2 gf = Game.KeystoneRuntime.GetGravityForce(e.Position);
-                if (gf.LengthSquared() > 0f) e.Position += gf * dt * 0.45f; // reduced pull
                 if (Raylib.CheckCollisionRecs(new Rectangle(player.Position.X - 10, player.Position.Y - 10, 20, 20), e.GetBounds()))
                 {
                     player.TakeDamage(e.ContactDamage);
@@ -495,10 +492,10 @@ namespace EchoesGame.Game
             float dist = MathF.Max(1f, toCenter.Length());
             Vector2 dir = toCenter / dist;
             // Stronger, longer falloff: 1/dist with additive bands
-            float strength = 700f * 1.2f * (1f / dist);
-            if (dist < 700f) strength += 110f * 1.2f;
-            if (dist < 350f) strength += 100f * 1.2f;
-            strength = MathF.Min(700f * 1.2f, strength);
+            float strength = 700f * 1.28f * (1f / dist);
+            if (dist < 700f) strength += 110f * 1.28f;
+            if (dist < 350f) strength += 100f * 1.28f;
+            strength = MathF.Min(700f * 1.28f, strength);
             return dir * strength;
         }
     }
