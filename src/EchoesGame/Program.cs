@@ -94,6 +94,7 @@ internal static class Program
                 projectilePool.Draw();
                 player.Draw(camera);
                 Game.FloatingTextSystem.Draw();
+                Game.KeystoneRuntime.DrawOverlayWorld();
                 Raylib.EndMode2D();
                 DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
                 // Next pact countdown (top-right)
@@ -245,6 +246,7 @@ internal static class Program
             bossShots.Draw();
             player.Draw(camera);
             Game.FloatingTextSystem.Draw();
+            Game.KeystoneRuntime.DrawOverlayWorld();
             Raylib.EndMode2D();
             
             DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
@@ -267,7 +269,6 @@ internal static class Program
             int pyB = 12;
             Game.Fonts.DrawText(pactTxtB, pxB, pyB, 20, Color.Red);
             if (paused || pactsMenuOpen) Game.PactRuntime.DrawPermanentPanel(Raylib.GetScreenWidth() - 360 - 16, 16, 360);
-            Game.KeystoneRuntime.DrawOverlay();
             boss.DrawBossHud();
             // Pact panel is drawn within DrawHud
             if (draftOpen) draft.Draw();
@@ -492,6 +493,13 @@ namespace EchoesGame.Game
             }
             string txt = $"Keystone: {active} {remaining:0.0}s";
             Fonts.DrawText(txt, 16, Raylib.GetScreenHeight() - 28, 20, Color.Gold);
+        }
+        public static void DrawOverlayWorld()
+        {
+            if (!(activeFlag && active == KeystoneType.GravityWell && gravityToBoss)) return;
+            // subtle ring around the boss anchor
+            Raylib.DrawCircleLines((int)gravityAnchor.X, (int)gravityAnchor.Y, 60f, new Color(255, 200, 0, 160));
+            Raylib.DrawCircleLines((int)gravityAnchor.X, (int)gravityAnchor.Y, 120f, new Color(255, 160, 0, 110));
         }
         public static Vector2 GetGravityForce(Vector2 pos)
         {
