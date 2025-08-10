@@ -155,7 +155,7 @@ internal static class Program
                 if (gameOver)
                 {
                     DrawGameOver();
-                    if (Raylib.IsKeyPressed(KeyboardKey.R)) { ResetGame(ref player, enemySpawner, ref projectilePool, ref xpOrbs, ref xpSystem, ref draftOpen, ref gameOver, ref elapsed, ref score, ref nextPactAt, ref nextBossAt, ref boss, ref bossShots, ref orbitals); }
+                    if (Raylib.IsKeyPressed(KeyboardKey.R)) { ResetGame(ref player, enemySpawner, ref projectilePool, ref xpOrbs, ref xpSystem, ref draftOpen, ref gameOver, ref elapsed, ref score, ref nextPactAt, ref nextBossAt, ref boss, ref bossShots, ref orbitals, ref bossIndex); }
                 }
                 Raylib.EndDrawing();
                 continue;
@@ -439,7 +439,7 @@ internal static class Program
         Raylib.DrawText(text, (w - tw)/2, h/2 - size, size, Color.Gold);
     }
 
-    private static void ResetGame(ref Game.Player player, Game.EnemySpawner spawner, ref Game.ProjectilePool proj, ref Game.XPOrbPool xpPool, ref Game.XPSystem xp, ref bool draftOpen, ref bool gameOver, ref float elapsed, ref int score, ref float nextPactAt, ref float nextBossAt, ref Game.BossManager boss, ref Game.EnemyProjectilePool bossShots, ref Game.OrbitalsSystem orbitals)
+private static void ResetGame(ref Game.Player player, Game.EnemySpawner spawner, ref Game.ProjectilePool proj, ref Game.XPOrbPool xpPool, ref Game.XPSystem xp, ref bool draftOpen, ref bool gameOver, ref float elapsed, ref int score, ref float nextPactAt, ref float nextBossAt, ref Game.BossManager boss, ref Game.EnemyProjectilePool bossShots, ref Game.OrbitalsSystem orbitals, ref int bossIndex)
     {
         player = new Game.Player(new Vector2(0,0));
         typeof(Game.EnemySpawner).GetField("enemies", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
@@ -466,9 +466,7 @@ internal static class Program
         // reset boss
         boss = new Game.BossManager();
         bossShots = new Game.EnemyProjectilePool(256);
-        // reset boss progression index in outer scope
-        typeof(Program).GetField("bossIndex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
-            .SetValue(null, 0);
+        bossIndex = 0;
     }
 
     private static void DrawBar(int x, int y, int width, int height, float normalized, string barBg = "ui_bar_bg.png", string barFg = "ui_bar_fg.png")
