@@ -246,6 +246,7 @@ internal static class Program
             DrawFloorTiles();
             DrawWorldWalls();
             enemySpawner.Draw(player.Position);
+            Game.WeaponPickupSystem.DrawStatic();
             boss.Draw();
             xpOrbs.Draw();
             projectilePool.Draw();
