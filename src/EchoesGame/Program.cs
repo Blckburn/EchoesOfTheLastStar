@@ -123,13 +123,13 @@ internal static class Program
                 {
                     draft.Draw();
                     // Handle input 1..3 or click
-                    if (Raylib.IsKeyPressed(KeyboardKey.One)) { draft.Apply(0, player); xpSystem.ConsumePending(); draftOpen = false; }
-                    else if (Raylib.IsKeyPressed(KeyboardKey.Two)) { draft.Apply(1, player); xpSystem.ConsumePending(); draftOpen = false; }
-                    else if (Raylib.IsKeyPressed(KeyboardKey.Three)) { draft.Apply(2, player); xpSystem.ConsumePending(); draftOpen = false; }
+                    if (Raylib.IsKeyPressed(KeyboardKey.One)) { draft.Apply(0, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
+                    else if (Raylib.IsKeyPressed(KeyboardKey.Two)) { draft.Apply(1, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
+                    else if (Raylib.IsKeyPressed(KeyboardKey.Three)) { draft.Apply(2, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
                     else if (Raylib.IsMouseButtonPressed(MouseButton.Left))
                     {
                         int i = draft.HitTest(Raylib.GetMousePosition());
-                        if (i >= 0) { draft.Apply(i, player); xpSystem.ConsumePending(); draftOpen = false; }
+                        if (i >= 0) { draft.Apply(i, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
                     }
                 }
                 if (pacts.Opened)
@@ -219,7 +219,7 @@ internal static class Program
 
             if (!draftOpen && xpSystem.PendingChoices > 0)
             {
-                draft.Open();
+                draft.Open(orbitals.IsUnlocked);
                 draftOpen = true;
             }
             if (!pacts.Opened && elapsed >= nextPactAt)
@@ -482,32 +482,38 @@ namespace EchoesGame.Game
         private float radius = 60f; // дальше от персонажа
         private float speed = 2.0f; // radians/sec
         private float damage = 8f;
-        private Vector2 p1, p2;
+        private int count = 2;
+        private Vector2[] points = new Vector2[8];
         public void Unlock(){ unlocked = true; }
         public bool IsUnlocked => unlocked;
+        public void AddRadius(float add){ radius += add; }
+        public void AddSpeed(float add){ speed += add; }
+        public void AddCount(int add){ count = Math.Min(points.Length, count + add); }
         public void Update(float dt, Vector2 playerPos, IReadOnlyList<Enemy> enemies)
         {
             if (!unlocked) return;
             angle += speed * dt;
-            p1 = playerPos + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * radius;
-            p2 = playerPos + new Vector2(MathF.Cos(angle + MathF.PI), MathF.Sin(angle + MathF.PI)) * radius;
+            for (int i=0;i<count;i++)
+            {
+                float a = angle + (i * (MathF.Tau / count));
+                points[i] = playerPos + new Vector2(MathF.Cos(a), MathF.Sin(a)) * radius;
+            }
             // Hit detection (simple radius check)
-            Rectangle b1 = new Rectangle(p1.X-6, p1.Y-6, 12, 12);
-            Rectangle b2 = new Rectangle(p2.X-6, p2.Y-6, 12, 12);
             for (int i=0;i<enemies.Count;i++)
             {
                 var e = enemies[i]; if (!e.Alive) continue;
-                if (Raylib.CheckCollisionRecs(b1, e.GetBounds()) || Raylib.CheckCollisionRecs(b2, e.GetBounds()))
+                var eb = e.GetBounds();
+                for (int k=0;k<count;k++)
                 {
-                    e.TakeDamage(damage);
+                    var b = new Rectangle(points[k].X-6, points[k].Y-6, 12, 12);
+                    if (Raylib.CheckCollisionRecs(b, eb)) { e.TakeDamage(damage); break; }
                 }
             }
         }
         public void Draw()
         {
             if (!unlocked) return;
-            Raylib.DrawCircleV(p1, 6, new Color(180, 220, 255, 255));
-            Raylib.DrawCircleV(p2, 6, new Color(180, 220, 255, 255));
+            for (int i=0;i<count;i++) Raylib.DrawCircleV(points[i], 6, new Color(180, 220, 255, 255));
         }
     }
 
@@ -1399,7 +1405,7 @@ namespace EchoesGame.Game
         }
     }
 
-    internal enum EnemyMod { None, Shielded, Berserk }
+    internal enum EnemyMod { None, Shielded, Berserk, Harpoon }
 
     internal sealed class XPSystem
     {
@@ -1469,19 +1475,29 @@ namespace EchoesGame.Game
 
     internal sealed class LevelUpDraft
     {
-        private readonly string[] titles = new[] {
+        private string[] titles = new[] {
             "+15% bullet speed", "+10% attack speed", "+20% damage",
             "+10% move speed", "+20% XP magnet", "-10% dash cooldown" };
-        private readonly string[] descs = new[] {
+        private string[] descs = new[] {
             "Bullets travel faster", "Shoot faster (higher APS)", "Increase overall damage",
             "Player moves faster", "XP orbs pull from farther", "Dash cooldown reduced" };
         private Rectangle[] cardRects = Array.Empty<Rectangle>();
         private static Font? cachedFont => FontsFontRef;
         private static Font? FontsFontRef;
 
-        public void Open()
+        public void Open(bool orbitalsUnlocked)
         {
             int x = 200; int y = 200; int w = 280; int h = 120; int gap = 24;
+            if (orbitalsUnlocked)
+            {
+                // extend pool with orbitals mods
+                titles = new[] { "+15% bullet speed", "+10% attack speed", "+20% damage",
+                    "+10% move speed", "+20% XP magnet", "-10% dash cooldown",
+                    "+Orbitals radius", "+Orbitals speed", "+1 orbital" };
+                descs = new[] { "Bullets travel faster", "Shoot faster (higher APS)", "Increase overall damage",
+                    "Player moves faster", "XP orbs pull from farther", "Dash cooldown reduced",
+                    "Increase orbitals distance from player", "Increase orbitals rotation speed", "Adds one more orbital" };
+            }
             // pick 3 unique indices from the list
             int[] idx = ShufflePick(Enumerable.Range(0, titles.Length).ToArray(), 3);
             cardRects = new Rectangle[] { new Rectangle(x, y, w, h), new Rectangle(x + w + gap, y, w, h), new Rectangle(x + (w + gap)*2, y, w, h) };
@@ -1511,7 +1527,7 @@ namespace EchoesGame.Game
             return -1;
         }
 
-        public void Apply(int index, Player player)
+        public void Apply(int index, Player player, OrbitalsSystem orbitals)
         {
             int k = shown[index];
             switch (k)
@@ -1522,6 +1538,9 @@ namespace EchoesGame.Game
                 case 3: player.ApplyMod(Player.ModType.MoveSpeed); break;
                 case 4: player.ApplyMod(Player.ModType.XPMagnet); break;
                 case 5: player.ApplyMod(Player.ModType.DashCooldown); break;
+                case 6: orbitals.AddRadius(10f); break;
+                case 7: orbitals.AddSpeed(0.5f); break;
+                case 8: orbitals.AddCount(1); break;
             }
         }
 
@@ -1776,11 +1795,20 @@ namespace EchoesGame.Game
 
             foreach (var e in enemies)
             {
-                // Elite berserk speed boost when low HP
+                // Elite behaviors
                 float spd = e.Speed;
                 if (e.IsElite && e.Modifier == EnemyMod.Berserk && e.HP < e.MaxHP * 0.5f)
                 {
                     e.Speed = spd * 1.5f;
+                }
+                if (e.IsElite && e.Modifier == EnemyMod.Harpoon)
+                {
+                    // occasional short dash toward player
+                    if (Raylib.GetRandomValue(0, 1000) < 6)
+                    {
+                        Vector2 to = target - e.Position; if (to.LengthSquared()>1e-5f) to = Vector2.Normalize(to);
+                        e.Position += to * 140f; // quick snap
+                    }
                 }
                 e.Update(dt, target);
                 e.Speed = spd; // restore base for next frame
@@ -1847,7 +1875,8 @@ namespace EchoesGame.Game
             if (Raylib.GetRandomValue(0, 99) < eliteChance)
             {
                 e.IsElite = true;
-                e.Modifier = (EnemyMod)(Raylib.GetRandomValue(1, 2)); // Shielded or Berserk
+                int modRoll = Raylib.GetRandomValue(1, 3); // 1..3 -> Shielded/Berserk/Harpoon
+                e.Modifier = (EnemyMod)modRoll;
                 e.MaxHP *= 1.5f; e.HP *= 1.5f;
             }
             enemies.Add(e);
