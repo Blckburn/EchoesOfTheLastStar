@@ -65,9 +65,9 @@ internal static class Program
                 float oy = Raylib.GetRandomValue(-60, 60);
                 xpOrbs.Spawn(new Vector2(pos.X + ox, pos.Y + oy), Raylib.GetRandomValue(smallMin, smallMax));
             }
-                // chance to drop large/epic XP crystals (buffed)
+                // chance to drop large/epic XP crystals (time‑scaled Epic)
                 if (Raylib.GetRandomValue(0,99) < 85) xpOrbs.Spawn(pos + new Vector2(20,0), (int)(20 * bossXpMult), Game.XPOrbType.Large);
-                if (Raylib.GetRandomValue(0,99) < 80) xpOrbs.Spawn(pos + new Vector2(-20,0), (int)(50 * bossXpMult), Game.XPOrbType.Epic);
+                if (Raylib.GetRandomValue(0,999) < Game.XPDropRuntime.EpicChancePercent) xpOrbs.Spawn(pos + new Vector2(-20,0), (int)(50 * bossXpMult), Game.XPOrbType.Epic);
                 Game.WeaponPickupSystem.TrySpawnVacuum(pos + new Vector2(0,24));
             score += 250;
             slowMoTimer = 0.6f;
@@ -171,6 +171,7 @@ internal static class Program
 
             // Update
             elapsed += dt;
+            Game.XPDropRuntime.SetElapsed(elapsed);
             player.TickDamageIFrames(dt);
             Game.PactRuntime.Update(dt);
             Game.KeystoneRuntime.Update(dt);
@@ -519,6 +520,20 @@ private static void ResetGame(ref Game.Player player, Game.EnemySpawner spawner,
 
 namespace EchoesGame.Game
 {
+    internal static class XPDropRuntime
+    {
+        public static float Elapsed { get; private set; }
+        public static void SetElapsed(float t){ Elapsed = t; }
+        public static int EpicChancePercent
+        {
+            get
+            {
+                if (Elapsed < 300f) return 80; // 5 min: редкий, но видимый
+                if (Elapsed < 600f) return 200; // 5-10 мин: заметно чаще
+                return 350; // 10+ мин: очень часто
+            }
+        }
+    }
     internal static class XPVacuumRuntime
     {
         private static float remaining;
@@ -1637,7 +1652,7 @@ namespace EchoesGame.Game
                 float growth = Level >= 20 ? 1.14f : 1.20f;
                 NextLevelXP = (int)(NextLevelXP * growth + 1);
                 PendingChoices++;
-                Infra.Analytics.Log("level_up", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()},{"level", Level}});
+                Infra.Analytics.Log("level_up", new System.Collections.Generic.Dictionary<string, object>{{"t", Game.XPDropRuntime.Elapsed},{"level", Level}});
             }
         }
 
