@@ -509,6 +509,7 @@ namespace EchoesGame.Game
         private float damage = 8f;
         private int count = 2;
         private Vector2[] points = new Vector2[8];
+        private readonly System.Collections.Generic.Dictionary<Enemy, float> dmgTextCooldown = new();
         public void Unlock(){ unlocked = true; }
         public bool IsUnlocked => unlocked;
         public void AddRadius(float add){ radius += add; }
@@ -523,6 +524,9 @@ namespace EchoesGame.Game
                 float a = angle + (i * (MathF.Tau / count));
                 points[i] = playerPos + new Vector2(MathF.Cos(a), MathF.Sin(a)) * radius;
             }
+            // decay cooldowns for damage text
+            var keys = dmgTextCooldown.Keys.ToArray();
+            for (int i=0;i<keys.Length;i++) dmgTextCooldown[keys[i]] = MathF.Max(0f, dmgTextCooldown[keys[i]] - dt);
             // Hit detection (simple radius check)
             for (int i=0;i<enemies.Count;i++)
             {
@@ -531,7 +535,17 @@ namespace EchoesGame.Game
                 for (int k=0;k<count;k++)
                 {
                     var b = new Rectangle(points[k].X-6, points[k].Y-6, 12, 12);
-                    if (Raylib.CheckCollisionRecs(b, eb)) { e.TakeDamage(damage); break; }
+                    if (Raylib.CheckCollisionRecs(b, eb))
+                    {
+                        e.TakeDamage(damage);
+                        // spawn yellow number with small per-enemy cooldown to avoid spam
+                        if (!dmgTextCooldown.TryGetValue(e, out var cd) || cd <= 0f)
+                        {
+                            FloatingTextSystem.Spawn(e.Position, $"{damage:0}", Color.Yellow);
+                            dmgTextCooldown[e] = 0.15f;
+                        }
+                        break;
+                    }
                 }
             }
         }
