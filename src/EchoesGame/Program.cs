@@ -50,6 +50,7 @@ internal static class Program
         int lastPending = 0;
         float nextPactAt = 30f;
         float nextBossAt = 60f; // first mini-boss at 1:00 for testing
+        int bossIndex = 0;
 
         float slowMoTimer = 0f;
         // Reward on boss death: big XP burst + brief slow-mo and score bonus
@@ -123,13 +124,13 @@ internal static class Program
                 {
                     draft.Draw();
                     // Handle input 1..3 or click
-                    if (Raylib.IsKeyPressed(KeyboardKey.One)) { draft.Apply(0, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
-                    else if (Raylib.IsKeyPressed(KeyboardKey.Two)) { draft.Apply(1, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
-                    else if (Raylib.IsKeyPressed(KeyboardKey.Three)) { draft.Apply(2, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
+                    if (Raylib.IsKeyPressed(KeyboardKey.One)) { draft.Apply(0, player, orbitals); xpSystem.ConsumePending(); lastPending = xpSystem.PendingChoices; draftOpen = false; }
+                    else if (Raylib.IsKeyPressed(KeyboardKey.Two)) { draft.Apply(1, player, orbitals); xpSystem.ConsumePending(); lastPending = xpSystem.PendingChoices; draftOpen = false; }
+                    else if (Raylib.IsKeyPressed(KeyboardKey.Three)) { draft.Apply(2, player, orbitals); xpSystem.ConsumePending(); lastPending = xpSystem.PendingChoices; draftOpen = false; }
                     else if (Raylib.IsMouseButtonPressed(MouseButton.Left))
                     {
                         int i = draft.HitTest(Raylib.GetMousePosition());
-                        if (i >= 0) { draft.Apply(i, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
+                        if (i >= 0) { draft.Apply(i, player, orbitals); xpSystem.ConsumePending(); lastPending = xpSystem.PendingChoices; draftOpen = false; }
                     }
                 }
                 if (pacts.Opened)
@@ -231,10 +232,12 @@ internal static class Program
             if (!boss.Alive && elapsed >= nextBossAt)
             {
                 boss.SpawnNear(camera);
+                boss.ScaleForIndex(bossIndex);
                 var k = (Game.KeystoneType)Raylib.GetRandomValue(0, 1);
                 Game.KeystoneRuntime.Activate(k, 35f);
                 if (k == Game.KeystoneType.GravityWell) Game.KeystoneRuntime.SetGravityAnchor(boss.Position);
                 Infra.Analytics.Log("boss_spawn", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()}});
+                bossIndex++;
                 nextBossAt += 180f;
             }
 
@@ -452,6 +455,9 @@ internal static class Program
         // reset boss
         boss = new Game.BossManager();
         bossShots = new Game.EnemyProjectilePool(256);
+        // reset boss progression index in outer scope
+        typeof(Program).GetField("bossIndex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+            .SetValue(null, 0);
     }
 
     private static void DrawBar(int x, int y, int width, int height, float normalized, string barBg = "ui_bar_bg.png", string barFg = "ui_bar_fg.png")
@@ -668,6 +674,7 @@ namespace EchoesGame.Game
         private float telegraphBaseAngleRad;
         private float fireWatchdogTimer;
         public Action<Vector2>? OnDeath;
+        private float baseChaseSpeed = 80f;
         public void SpawnNear(Camera2D camera)
         {
             float left = camera.Target.X - camera.Offset.X;
@@ -678,13 +685,21 @@ namespace EchoesGame.Game
             telegraphActive = false; telegraphTimer = 0f; telegraphBaseAngleRad = 0f;
             fireWatchdogTimer = 0f;
         }
+        public void ScaleForIndex(int index)
+        {
+            float hpScale = 1f + index * 0.35f;
+            float speedScale = 1f + index * 0.10f;
+            hpMax = 800f * hpScale; hp = hpMax;
+            // move speed scaling is handled in Update via Position += dir * 80*dt, so scale that factor
+            baseChaseSpeed = 80f * speedScale;
+        }
         public void Update(float dt, Vector2 playerPos)
         {
             if (!alive) return;
             // gravity well affects player via KeystoneRuntime; boss chases slowly
             Vector2 dir = playerPos - Position;
             if (dir.LengthSquared() > 1e-4f) dir = Vector2.Normalize(dir);
-            Position += dir * 80f * dt;
+            Position += dir * baseChaseSpeed * dt;
             // Face toward player for rendering
             float angleDeg = MathF.Atan2(dir.Y, dir.X) * (180f / MathF.PI);
             facingDeg = angleDeg;
