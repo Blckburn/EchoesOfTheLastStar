@@ -27,6 +27,7 @@ internal static class Program
         var xpSystem = new Game.XPSystem();
         var xpOrbs = new Game.XPOrbPool(capacity: 512);
         var draft = new Game.LevelUpDraft();
+        var orbitals = new Game.OrbitalsSystem();
         var pacts = new Game.PactOverlay();
         var boss = new Game.BossManager();
         var bossShots = new Game.EnemyProjectilePool(256);
@@ -97,6 +98,7 @@ internal static class Program
                 Game.KeystoneRuntime.DrawOverlayWorld();
                 Raylib.EndMode2D();
                 DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
+                Game.KeystoneRuntime.DrawOverlay();
                 // Next pact countdown (top-right)
                 float pactRemainA = MathF.Max(0f, nextPactAt - elapsed);
                 string pactTxtA = $"Next Pact: {pactRemainA:0}s";
@@ -118,13 +120,13 @@ internal static class Program
                 {
                     draft.Draw();
                     // Handle input 1..3 or click
-                    if (Raylib.IsKeyPressed(KeyboardKey.One)) { draft.Apply(0, player); xpSystem.ConsumePending(); draftOpen = false; }
-                    else if (Raylib.IsKeyPressed(KeyboardKey.Two)) { draft.Apply(1, player); xpSystem.ConsumePending(); draftOpen = false; }
-                    else if (Raylib.IsKeyPressed(KeyboardKey.Three)) { draft.Apply(2, player); xpSystem.ConsumePending(); draftOpen = false; }
+                    if (Raylib.IsKeyPressed(KeyboardKey.One)) { draft.Apply(0, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
+                    else if (Raylib.IsKeyPressed(KeyboardKey.Two)) { draft.Apply(1, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
+                    else if (Raylib.IsKeyPressed(KeyboardKey.Three)) { draft.Apply(2, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
                     else if (Raylib.IsMouseButtonPressed(MouseButton.Left))
                     {
                         int i = draft.HitTest(Raylib.GetMousePosition());
-                        if (i >= 0) { draft.Apply(i, player); xpSystem.ConsumePending(); draftOpen = false; }
+                        if (i >= 0) { draft.Apply(i, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
                     }
                 }
                 if (pacts.Opened)
@@ -171,6 +173,7 @@ internal static class Program
             projectilePool.Update(dt);
             bossShots.Update(dt, ref player);
             xpOrbs.Update(dt, player.Position, xpSystem, player.XPMagnetMultiplier);
+            orbitals.Update(dt, player.Position, enemySpawner.Enemies);
             Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (enemy) => { xpOrbs.Spawn(enemy.Position, Raylib.GetRandomValue(1,2)); score += enemy.IsElite ? 25 : 10; }, boss);
             // Apply dynamic bonuses from timed pacts
             if (Game.PactRuntime.EliteChanceBonus > 0f) enemySpawner.SetEliteChanceBonus(Game.PactRuntime.EliteChanceBonus); else enemySpawner.SetEliteChanceBonus(0f);
@@ -244,12 +247,14 @@ internal static class Program
             xpOrbs.Draw();
             projectilePool.Draw();
             bossShots.Draw();
+            orbitals.Draw();
             player.Draw(camera);
             Game.FloatingTextSystem.Draw();
             Game.KeystoneRuntime.DrawOverlayWorld();
             Raylib.EndMode2D();
             
             DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
+            Game.KeystoneRuntime.DrawOverlay();
             if (paused)
             {
                 int w = Raylib.GetScreenWidth();
@@ -462,6 +467,40 @@ internal static class Program
 
 namespace EchoesGame.Game
 {
+    internal sealed class OrbitalsSystem
+    {
+        private bool unlocked;
+        private float angle;
+        private float radius = 46f;
+        private float speed = 2.0f; // radians/sec
+        private float damage = 8f;
+        private Vector2 p1, p2;
+        public void Unlock(){ unlocked = true; }
+        public void Update(float dt, Vector2 playerPos, IReadOnlyList<Enemy> enemies)
+        {
+            if (!unlocked) return;
+            angle += speed * dt;
+            p1 = playerPos + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * radius;
+            p2 = playerPos + new Vector2(MathF.Cos(angle + MathF.PI), MathF.Sin(angle + MathF.PI)) * radius;
+            // Hit detection (simple radius check)
+            Rectangle b1 = new Rectangle(p1.X-6, p1.Y-6, 12, 12);
+            Rectangle b2 = new Rectangle(p2.X-6, p2.Y-6, 12, 12);
+            for (int i=0;i<enemies.Count;i++)
+            {
+                var e = enemies[i]; if (!e.Alive) continue;
+                if (Raylib.CheckCollisionRecs(b1, e.GetBounds()) || Raylib.CheckCollisionRecs(b2, e.GetBounds()))
+                {
+                    e.TakeDamage(damage);
+                }
+            }
+        }
+        public void Draw()
+        {
+            if (!unlocked) return;
+            Raylib.DrawCircleV(p1, 6, new Color(180, 220, 255, 255));
+            Raylib.DrawCircleV(p2, 6, new Color(180, 220, 255, 255));
+        }
+    }
     internal enum KeystoneType { GravityWell, Darkness }
 
     internal static class KeystoneRuntime
@@ -1387,10 +1426,10 @@ namespace EchoesGame.Game
     {
         private readonly string[] titles = new[] {
             "+15% bullet speed", "+10% attack speed", "+20% damage",
-            "+10% move speed", "+20% XP magnet", "-10% dash cooldown" };
+            "+10% move speed", "+20% XP magnet", "-10% dash cooldown", "Unlock Orbitals" };
         private readonly string[] descs = new[] {
             "Bullets travel faster", "Shoot faster (higher APS)", "Increase overall damage",
-            "Player moves faster", "XP orbs pull from farther", "Dash cooldown reduced" };
+            "Player moves faster", "XP orbs pull from farther", "Dash cooldown reduced", "Add two orbiting blades that damage enemies near you" };
         private Rectangle[] cardRects = Array.Empty<Rectangle>();
         private static Font? cachedFont => FontsFontRef;
         private static Font? FontsFontRef;
@@ -1427,7 +1466,7 @@ namespace EchoesGame.Game
             return -1;
         }
 
-        public void Apply(int index, Player player)
+        public void Apply(int index, Player player, OrbitalsSystem orbitals)
         {
             int k = shown[index];
             switch (k)
@@ -1438,6 +1477,7 @@ namespace EchoesGame.Game
                 case 3: player.ApplyMod(Player.ModType.MoveSpeed); break;
                 case 4: player.ApplyMod(Player.ModType.XPMagnet); break;
                 case 5: player.ApplyMod(Player.ModType.DashCooldown); break;
+                case 6: orbitals.Unlock(); break;
             }
         }
 
