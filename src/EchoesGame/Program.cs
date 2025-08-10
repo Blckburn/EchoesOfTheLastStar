@@ -543,6 +543,11 @@ namespace EchoesGame.Game
         private float hp;
         private float shootTimer;
         private const float ShootInterval = 0.7f; // fan burst
+        // Telegraph state
+        private bool telegraphActive;
+        private float telegraphTimer;
+        private const float TelegraphDuration = 0.45f;
+        private float telegraphBaseAngleRad;
         public Action<Vector2>? OnDeath;
         public void SpawnNear(Camera2D camera)
         {
@@ -551,6 +556,7 @@ namespace EchoesGame.Game
             Position = new Vector2(left + camera.Offset.X, top + camera.Offset.Y - 120);
             hp = hpMax; alive = true;
             shootTimer = 0f;
+            telegraphActive = false; telegraphTimer = 0f; telegraphBaseAngleRad = 0f;
         }
         public void Update(float dt, Vector2 playerPos)
         {
@@ -566,17 +572,29 @@ namespace EchoesGame.Game
         public void Update(float dt, Vector2 playerPos, EnemyProjectilePool shots)
         {
             if (!alive) return; Update(dt, playerPos);
-            shootTimer += dt; if (shootTimer >= ShootInterval)
+            shootTimer += dt;
+            if (!telegraphActive && shootTimer >= ShootInterval)
             {
-                shootTimer = 0f;
-                // fire a 5-shot fan toward player
-                Vector2 to = playerPos - Position; if (to.LengthSquared()<1e-4f) to = new Vector2(1,0); to = Vector2.Normalize(to);
-                float baseAng = MathF.Atan2(to.Y, to.X);
-                for (int i=-2;i<=2;i++)
+                // start telegraph
+                telegraphActive = true; telegraphTimer = 0f;
+                Vector2 to = playerPos - Position; if (to.LengthSquared() < 1e-4f) to = new Vector2(1, 0); to = Vector2.Normalize(to);
+                telegraphBaseAngleRad = MathF.Atan2(to.Y, to.X);
+                Infra.Analytics.Log("boss_fanshot_telegraph_start", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()}});
+            }
+            if (telegraphActive)
+            {
+                telegraphTimer += dt;
+                if (telegraphTimer >= TelegraphDuration)
                 {
-                    float ang = baseAng + i * 0.11f;
-                    Vector2 v = new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * 320f;
-                    shots.Spawn(Position, v, 8f);
+                    // fire after telegraph, reset cycle
+                    telegraphActive = false; shootTimer = 0f;
+                    for (int i = -2; i <= 2; i++)
+                    {
+                        float ang = telegraphBaseAngleRad + i * 0.11f;
+                        Vector2 v = new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * 320f;
+                        shots.Spawn(Position, v, 8f);
+                    }
+                    Infra.Analytics.Log("boss_fanshot_fire", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()}});
                 }
             }
         }
@@ -596,6 +614,16 @@ namespace EchoesGame.Game
             {
                 Raylib.DrawCircleV(Position, 28f, new Color(255,255,0,180));
                 Raylib.DrawCircleLines((int)Position.X, (int)Position.Y, 32f, Color.Gold);
+            }
+            // Telegraph wedge overlay
+            if (telegraphActive)
+            {
+                float baseDeg = telegraphBaseAngleRad * (180f / MathF.PI);
+                float stepDeg = 0.11f * (180f / MathF.PI);
+                float start = baseDeg - stepDeg * 2f - 4f;
+                float end = baseDeg + stepDeg * 2f + 4f;
+                Raylib.DrawCircleSector(Position, 220f, start, end, 28, new Color(255, 200, 0, 80));
+                Raylib.DrawCircleSectorLines(Position, 220f, start, end, 28, new Color(255, 220, 0, 180));
             }
         }
         public void DrawBossHud()
