@@ -1636,6 +1636,10 @@ namespace EchoesGame.Game
         private float threat; // grows with time
         private int batchSize = 1;
         private float eliteChanceBonus = 0f; // from timed pacts
+        // Breathing waves: short relief every period
+        private float breatheTimer = 0f;
+        private const float BreathePeriodSec = 20f;
+        private int breatheTicksRemaining = 0; // number of spawn acts with longer interval
 
         public IReadOnlyList<Enemy> Enemies => enemies;
         public int Count => enemies.Count;
@@ -1645,17 +1649,28 @@ namespace EchoesGame.Game
             timer += dt;
             threat += dt;
             // escalation (smoother growth)
-            interval = MathF.Max(0.5f, 1.25f - threat * 0.009f);
+            float baseInterval = MathF.Max(0.5f, 1.25f - threat * 0.009f);
             maxAlive = 28 + (int)MathF.Min(72, threat * 0.75f);
-            batchSize = (threat > 36f) ? 2 : 1;
-            if (threat > 72f) batchSize = 3;
-            if (threat > 108f) batchSize = 4;
+            batchSize = (threat > 30f) ? 2 : 1;
+            if (threat > 60f) batchSize = 3;
+            if (threat > 90f) batchSize = 4;
+
+            // Breathing wave timer
+            breatheTimer += dt;
+            if (breatheTimer >= BreathePeriodSec)
+            {
+                breatheTimer = 0f;
+                breatheTicksRemaining = Raylib.GetRandomValue(3, 4);
+                Infra.Analytics.Log("breath_start", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()}});
+            }
+            interval = baseInterval * (breatheTicksRemaining > 0 ? 1.5f : 1f);
 
             if (timer >= interval && enemies.Count < maxAlive)
             {
                 timer = 0f;
                 int toSpawn = Math.Min(batchSize, Math.Max(1, maxAlive - enemies.Count));
                 for (int i = 0; i < toSpawn; i++) SpawnAtViewEdges(camera);
+                if (breatheTicksRemaining > 0) breatheTicksRemaining--;
             }
 
             foreach (var e in enemies)
