@@ -155,7 +155,7 @@ internal static class Program
                 if (gameOver)
                 {
                     DrawGameOver();
-                    if (Raylib.IsKeyPressed(KeyboardKey.R)) { ResetGame(ref player, enemySpawner, ref projectilePool, ref xpOrbs, ref xpSystem, ref draftOpen, ref gameOver, ref elapsed, ref score, ref nextPactAt, ref nextBossAt, ref boss, ref bossShots); }
+                    if (Raylib.IsKeyPressed(KeyboardKey.R)) { ResetGame(ref player, enemySpawner, ref projectilePool, ref xpOrbs, ref xpSystem, ref draftOpen, ref gameOver, ref elapsed, ref score, ref nextPactAt, ref nextBossAt, ref boss, ref bossShots, ref orbitals); }
                 }
                 Raylib.EndDrawing();
                 continue;
@@ -233,6 +233,15 @@ internal static class Program
             {
                 boss.SpawnNear(camera);
                 boss.ScaleForIndex(bossIndex);
+                // grant elite modifiers to later bosses: index 1 -> +1, index >=2 -> +2
+                if (bossIndex >= 1)
+                {
+                    boss.AddEliteMod((Game.EnemyMod)Raylib.GetRandomValue(1, 3));
+                }
+                if (bossIndex >= 2)
+                {
+                    boss.AddEliteMod((Game.EnemyMod)Raylib.GetRandomValue(1, 3));
+                }
                 var k = (Game.KeystoneType)Raylib.GetRandomValue(0, 1);
                 Game.KeystoneRuntime.Activate(k, 35f);
                 if (k == Game.KeystoneType.GravityWell) Game.KeystoneRuntime.SetGravityAnchor(boss.Position);
@@ -430,7 +439,7 @@ internal static class Program
         Raylib.DrawText(text, (w - tw)/2, h/2 - size, size, Color.Gold);
     }
 
-    private static void ResetGame(ref Game.Player player, Game.EnemySpawner spawner, ref Game.ProjectilePool proj, ref Game.XPOrbPool xpPool, ref Game.XPSystem xp, ref bool draftOpen, ref bool gameOver, ref float elapsed, ref int score, ref float nextPactAt, ref float nextBossAt, ref Game.BossManager boss, ref Game.EnemyProjectilePool bossShots)
+    private static void ResetGame(ref Game.Player player, Game.EnemySpawner spawner, ref Game.ProjectilePool proj, ref Game.XPOrbPool xpPool, ref Game.XPSystem xp, ref bool draftOpen, ref bool gameOver, ref float elapsed, ref int score, ref float nextPactAt, ref float nextBossAt, ref Game.BossManager boss, ref Game.EnemyProjectilePool bossShots, ref Game.OrbitalsSystem orbitals)
     {
         player = new Game.Player(new Vector2(0,0));
         typeof(Game.EnemySpawner).GetField("enemies", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
@@ -443,6 +452,8 @@ internal static class Program
         elapsed = 0f;
         score = 0;
         Game.WeaponPickupSystem.Reset();
+        // reset orbitals weapon
+        orbitals = new Game.OrbitalsSystem();
         nextPactAt = 30f;
         nextBossAt = 60f;
         Game.PactRuntime.ResetAll();
@@ -675,6 +686,7 @@ namespace EchoesGame.Game
         private float fireWatchdogTimer;
         public Action<Vector2>? OnDeath;
         private float baseChaseSpeed = 80f;
+        private readonly System.Collections.Generic.HashSet<EnemyMod> mods = new();
         public void SpawnNear(Camera2D camera)
         {
             float left = camera.Target.X - camera.Offset.X;
@@ -782,12 +794,14 @@ namespace EchoesGame.Game
             int w = 300; int h = 14; int x = (Raylib.GetScreenWidth()-w)/2; int y = 16;
             Raylib.DrawRectangle(x, y, w, h, Color.DarkGray);
             float n = MathF.Max(0f, hp) / hpMax; Raylib.DrawRectangle(x, y, (int)(w*n), h, Color.Red);
-            Fonts.DrawText("MINI-BOSS", x, y-18, 20, Color.Gold);
+            string title = mods.Count > 0 ? $"MINI-BOSS [{string.Join(',', mods)}]" : "MINI-BOSS";
+            Fonts.DrawText(title, x, y-18, 20, Color.Gold);
         }
         public void TakeDamage(float d)
         {
             if (!alive) return; hp -= d; if (hp <= 0f) { alive = false; FloatingTextSystem.Spawn(Position, "+XP", Color.Gold); OnDeath?.Invoke(Position); }
         }
+        public void AddEliteMod(EnemyMod mod){ mods.Add(mod); }
     }
     internal static class PactsMenuOverlay
     {
