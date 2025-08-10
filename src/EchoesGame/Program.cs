@@ -63,6 +63,7 @@ internal static class Program
             score += 250;
             slowMoTimer = 0.6f;
                 Infra.Analytics.Log("boss_kill", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()}});
+                Game.WeaponPickupSystem.EnsureBossDrop(pos);
         };
         while (!Raylib.WindowShouldClose())
         {
@@ -91,6 +92,8 @@ internal static class Program
                 DrawFloorTiles();
                 DrawWorldWalls();
                 enemySpawner.Draw(player.Position);
+                // weapon pickups (if any)
+                Game.WeaponPickupSystem.DrawStatic();
                 xpOrbs.Draw();
                 projectilePool.Draw();
                 player.Draw(camera);
@@ -120,13 +123,13 @@ internal static class Program
                 {
                     draft.Draw();
                     // Handle input 1..3 or click
-                    if (Raylib.IsKeyPressed(KeyboardKey.One)) { draft.Apply(0, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
-                    else if (Raylib.IsKeyPressed(KeyboardKey.Two)) { draft.Apply(1, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
-                    else if (Raylib.IsKeyPressed(KeyboardKey.Three)) { draft.Apply(2, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
+                    if (Raylib.IsKeyPressed(KeyboardKey.One)) { draft.Apply(0, player); xpSystem.ConsumePending(); draftOpen = false; }
+                    else if (Raylib.IsKeyPressed(KeyboardKey.Two)) { draft.Apply(1, player); xpSystem.ConsumePending(); draftOpen = false; }
+                    else if (Raylib.IsKeyPressed(KeyboardKey.Three)) { draft.Apply(2, player); xpSystem.ConsumePending(); draftOpen = false; }
                     else if (Raylib.IsMouseButtonPressed(MouseButton.Left))
                     {
                         int i = draft.HitTest(Raylib.GetMousePosition());
-                        if (i >= 0) { draft.Apply(i, player, orbitals); xpSystem.ConsumePending(); draftOpen = false; }
+                        if (i >= 0) { draft.Apply(i, player); xpSystem.ConsumePending(); draftOpen = false; }
                     }
                 }
                 if (pacts.Opened)
@@ -434,6 +437,7 @@ internal static class Program
         gameOver = false;
         elapsed = 0f;
         score = 0;
+        Game.WeaponPickupSystem.Reset();
     }
 
     private static void DrawBar(int x, int y, int width, int height, float normalized, string barBg = "ui_bar_bg.png", string barFg = "ui_bar_fg.png")
@@ -471,11 +475,12 @@ namespace EchoesGame.Game
     {
         private bool unlocked;
         private float angle;
-        private float radius = 46f;
+        private float radius = 60f; // дальше от персонажа
         private float speed = 2.0f; // radians/sec
         private float damage = 8f;
         private Vector2 p1, p2;
         public void Unlock(){ unlocked = true; }
+        public bool IsUnlocked => unlocked;
         public void Update(float dt, Vector2 playerPos, IReadOnlyList<Enemy> enemies)
         {
             if (!unlocked) return;
@@ -500,6 +505,42 @@ namespace EchoesGame.Game
             Raylib.DrawCircleV(p1, 6, new Color(180, 220, 255, 255));
             Raylib.DrawCircleV(p2, 6, new Color(180, 220, 255, 255));
         }
+    }
+
+    internal static class WeaponPickupSystem
+    {
+        private static bool orbitalDropped = false;
+        private static Rectangle? pickup;
+        public static void EnsureBossDrop(Vector2 bossPos)
+        {
+            if (orbitalDropped) return;
+            pickup = new Rectangle(bossPos.X, bossPos.Y, 18, 18);
+            orbitalDropped = true;
+        }
+        public static void Update(float dt, ref Player player, OrbitalsSystem orbitals)
+        {
+            if (pickup.HasValue)
+            {
+                var r = pickup.Value;
+                var pr = new Rectangle(player.Position.X-10, player.Position.Y-10, 20, 20);
+                if (Raylib.CheckCollisionRecs(r, pr))
+                {
+                    orbitals.Unlock();
+                    FloatingTextSystem.Spawn(player.Position, "Orbitals unlocked", Color.SkyBlue);
+                    pickup = null;
+                }
+            }
+        }
+        public static void DrawStatic()
+        {
+            if (pickup.HasValue)
+            {
+                var r = pickup.Value;
+                Raylib.DrawRectangleRec(r, new Color(80,160,255,200));
+                Raylib.DrawRectangleLinesEx(r, 2, Color.White);
+            }
+        }
+        public static void Reset(){ orbitalDropped=false; pickup=null; }
     }
     internal enum KeystoneType { GravityWell, Darkness }
 
@@ -1426,10 +1467,10 @@ namespace EchoesGame.Game
     {
         private readonly string[] titles = new[] {
             "+15% bullet speed", "+10% attack speed", "+20% damage",
-            "+10% move speed", "+20% XP magnet", "-10% dash cooldown", "Unlock Orbitals" };
+            "+10% move speed", "+20% XP magnet", "-10% dash cooldown" };
         private readonly string[] descs = new[] {
             "Bullets travel faster", "Shoot faster (higher APS)", "Increase overall damage",
-            "Player moves faster", "XP orbs pull from farther", "Dash cooldown reduced", "Add two orbiting blades that damage enemies near you" };
+            "Player moves faster", "XP orbs pull from farther", "Dash cooldown reduced" };
         private Rectangle[] cardRects = Array.Empty<Rectangle>();
         private static Font? cachedFont => FontsFontRef;
         private static Font? FontsFontRef;
@@ -1466,7 +1507,7 @@ namespace EchoesGame.Game
             return -1;
         }
 
-        public void Apply(int index, Player player, OrbitalsSystem orbitals)
+        public void Apply(int index, Player player)
         {
             int k = shown[index];
             switch (k)
@@ -1477,7 +1518,6 @@ namespace EchoesGame.Game
                 case 3: player.ApplyMod(Player.ModType.MoveSpeed); break;
                 case 4: player.ApplyMod(Player.ModType.XPMagnet); break;
                 case 5: player.ApplyMod(Player.ModType.DashCooldown); break;
-                case 6: orbitals.Unlock(); break;
             }
         }
 
