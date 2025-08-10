@@ -152,6 +152,10 @@ internal static class Program
             player.Update(dt, projectilePool, camera);
             enemySpawner.Update(dt, player.Position, camera);
             boss.Update(dt, player.Position, bossShots);
+            if (Game.KeystoneRuntime.IsActiveGravityWell && boss.Alive)
+            {
+                Game.KeystoneRuntime.SetGravityAnchor(boss.Position);
+            }
             projectilePool.Update(dt);
             bossShots.Update(dt, ref player);
             xpOrbs.Update(dt, player.Position, xpSystem, player.XPMagnetMultiplier);
@@ -180,12 +184,7 @@ internal static class Program
             }
             // GravityWell pull on player
             Vector2 gfp = Game.KeystoneRuntime.GetGravityForce(player.Position);
-            if (gfp.LengthSquared() > 0f)
-            {
-                // simulate pull: modify position directly for now
-                typeof(Game.Player).GetProperty("Position", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)!
-                    .SetValue(player, (Vector2)typeof(Game.Player).GetProperty("Position", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)!.GetValue(player)! + gfp * dt * 0.35f);
-            }
+            if (gfp.LengthSquared() > 0f) player.ApplyExternalForce(gfp, dt * 0.45f);
             if (boss.Alive)
             {
                 if (Raylib.CheckCollisionRecs(new Rectangle(player.Position.X - 10, player.Position.Y - 10, 20, 20), boss.Bounds))
@@ -446,6 +445,7 @@ namespace EchoesGame.Game
         private static float remaining;
         private static bool activeFlag;
         public static bool IsActiveDarkness => activeFlag && active == KeystoneType.Darkness;
+        public static bool IsActiveGravityWell => activeFlag && active == KeystoneType.GravityWell;
         private static Vector2 gravityAnchor = Vector2.Zero;
         private static bool gravityToBoss = false;
         public static void Activate(KeystoneType type, float duration)
@@ -797,7 +797,7 @@ namespace EchoesGame.Game
                 int rowTop = y + padding + line - 2;
                 int left = x + 2; // inside border
                 Raylib.DrawRectangle(left, rowTop, (int)(contentW * frac), rowH - 2, new Color(140, 0, 0, 100));
-                Game.Fonts.DrawText(txt, x + padding, rowTop + 2, 18, Color.RayWhite);
+                Game.Fonts.DrawText(txt, x + padding + 2, rowTop + 2, 18, Color.RayWhite);
                 line += rowH;
             }
         }
@@ -894,6 +894,13 @@ namespace EchoesGame.Game
             damageIFrames = 0.4f; // minimal tick between damage
             // Player hit feedback
             Game.FloatingTextSystem.Spawn(Position, $"-{dmg:0}", Color.Red);
+        }
+        public void ApplyExternalForce(Vector2 force, float scale)
+        {
+            Position += force * scale;
+            float halfW = Config.WorldWidth / 2f - 16f;
+            float halfH = Config.WorldHeight / 2f - 16f;
+            Position = new Vector2(Config.Clamp(Position.X, -halfW, halfW), Config.Clamp(Position.Y, -halfH, halfH));
         }
         public void TickDamageIFrames(float dt) { if (damageIFrames > 0f) damageIFrames -= dt; }
         public void HealPercent(float p)
