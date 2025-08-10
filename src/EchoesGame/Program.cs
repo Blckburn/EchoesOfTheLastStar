@@ -101,7 +101,17 @@ internal static class Program
                 int pxA = Raylib.GetScreenWidth() - 200;
                 int pyA = 12;
                 Game.Fonts.DrawText(pactTxtA, pxA, pyA, 20, Color.Red);
-                if (paused) Game.PactRuntime.DrawPermanentPanel(Raylib.GetScreenWidth() - 360 - 16, 16, 360);
+                if (paused) {
+                    Game.PactRuntime.DrawPermanentPanel(Raylib.GetScreenWidth() - 360 - 16, 16, 360);
+                    // Center PAUSED label
+                    int w = Raylib.GetScreenWidth();
+                    int h = Raylib.GetScreenHeight();
+                    string t = "PAUSED (P)";
+                    int size = 36; int tw = Raylib.MeasureText(t, size);
+                    int tx = (w - tw) / 2; int ty = h / 2 - size;
+                    Raylib.DrawText(t, tx+1, ty+1, size, Color.Black);
+                    Raylib.DrawText(t, tx, ty, size, Color.Gold);
+                }
                 if (draftOpen)
                 {
                     draft.Draw();
@@ -230,8 +240,20 @@ internal static class Program
             player.Draw(camera);
             Game.FloatingTextSystem.Draw();
             Raylib.EndMode2D();
-
+            
             DrawHud(player, paused, projectilePool.ActiveCount, enemySpawner.Count, xpSystem, elapsed, score);
+            if (paused)
+            {
+                int w = Raylib.GetScreenWidth();
+                int h = Raylib.GetScreenHeight();
+                string t = "PAUSED (P)";
+                int size = 36;
+                int tw = Raylib.MeasureText(t, size);
+                int tx = (w - tw) / 2;
+                int ty = h / 2 - size;
+                Raylib.DrawText(t, tx+1, ty+1, size, Color.Black);
+                Raylib.DrawText(t, tx, ty, size, Color.Gold);
+            }
             // Next pact countdown (top-right)
             float pactRemainB = MathF.Max(0f, nextPactAt - elapsed);
             string pactTxtB = $"Next Pact: {pactRemainB:0}s";
@@ -370,10 +392,6 @@ internal static class Program
         // Pact effects panel directly under Mods
         y += 6;
         Game.PactRuntime.DrawHudPanel(16, y, 360);
-        if (paused)
-        {
-            Game.Fonts.DrawText("PAUSED (P)", 16, y, 22, Color.Gold);
-        }
     }
 
     private static bool TryHasRed()
@@ -477,10 +495,10 @@ namespace EchoesGame.Game
             float dist = MathF.Max(1f, toCenter.Length());
             Vector2 dir = toCenter / dist;
             // Stronger, longer falloff: 1/dist with additive bands
-            float strength = 700f * (1f / dist);
-            if (dist < 700f) strength += 110f;
-            if (dist < 350f) strength += 100f;
-            strength = MathF.Min(700f, strength);
+            float strength = 700f * 1.2f * (1f / dist);
+            if (dist < 700f) strength += 110f * 1.2f;
+            if (dist < 350f) strength += 100f * 1.2f;
+            strength = MathF.Min(700f * 1.2f, strength);
             return dir * strength;
         }
     }
@@ -796,11 +814,13 @@ namespace EchoesGame.Game
             if (active.Count == 0) return;
             int padding = 8;
             int rowH = 22;
-            int contentW = width - 4; // fill almost the entire panel width
+            int contentW = width - 4; // want full bar width inside outer border
             int height = padding * 2 + 20 + active.Count * rowH;
-            // Neutral backdrop + border
-            Raylib.DrawRectangle(x, y, width, height, new Color(60, 60, 60, 140));
+            // Full opaque gray backdrop, then black translucent underlay for the bar area
+            Raylib.DrawRectangle(x, y, width, height, new Color(80, 80, 80, 255));
             Raylib.DrawRectangleLines(x, y, width, height, Color.Maroon);
+            // Title with slight outline
+            Fonts.DrawText("Pact effects (timed):", x + padding + 1, y + padding + 1, 20, Color.Black);
             Fonts.DrawText("Pact effects (timed):", x + padding, y + padding, 20, Color.Gold);
             int line = 20;
             for (int i = 0; i < active.Count; i++)
@@ -808,14 +828,19 @@ namespace EchoesGame.Game
                 var e = active[i];
                 string name = e.Type switch { PactEffect.XPGain => "Greed Pact: +XP", PactEffect.EliteChance => "Greed Pact: +Elite chance", _ => "Effect" };
                 string txt = $"{name} {e.Strength*100:0}% — {e.Remaining:0.0}s";
-                // progress fill (single red bar, full possible width, no inner lines)
+                // progress fill: red shrinking bar spans entire inner width; background under it is semi‑transparent black
                 float total = GetEffectTotalDuration(e.Type);
                 float frac = total <= 0f ? 0f : (e.Remaining / total);
                 if (frac < 0f) frac = 0f; if (frac > 1f) frac = 1f;
                 int rowTop = y + padding + line - 2;
                 int left = x + 2; // inside border
-                Raylib.DrawRectangle(left, rowTop, (int)(contentW * frac), rowH - 2, new Color(140, 0, 0, 100));
-                Game.Fonts.DrawText(txt, x + padding + 2, rowTop + 2, 18, Color.RayWhite);
+                // background (empty) area
+                Raylib.DrawRectangle(left, rowTop, contentW, rowH - 2, new Color(0, 0, 0, 120));
+                // red filled remaining time
+                Raylib.DrawRectangle(left, rowTop, (int)(contentW * frac), rowH - 2, new Color(160, 0, 0, 180));
+                // title with outline on the bar
+                Game.Fonts.DrawText(txt, x + padding + 3, rowTop + 3, 18, Color.Black);
+                Game.Fonts.DrawText(txt, x + padding + 2, rowTop + 2, 18, Color.Yellow);
                 line += rowH;
             }
         }
