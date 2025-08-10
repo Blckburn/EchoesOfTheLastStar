@@ -61,6 +61,9 @@ internal static class Program
                 float oy = Raylib.GetRandomValue(-60, 60);
                 xpOrbs.Spawn(new Vector2(pos.X + ox, pos.Y + oy), Raylib.GetRandomValue(3, 6));
             }
+                // small chance to drop large/epic XP crystals
+                if (Raylib.GetRandomValue(0,99) < 50) xpOrbs.Spawn(pos + new Vector2(20,0), 20, Game.XPOrbType.Large);
+                if (Raylib.GetRandomValue(0,99) < 25) xpOrbs.Spawn(pos + new Vector2(-20,0), 50, Game.XPOrbType.Epic);
             score += 250;
             slowMoTimer = 0.6f;
                 Infra.Analytics.Log("boss_kill", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()}});
@@ -176,10 +179,17 @@ internal static class Program
             }
             projectilePool.Update(dt);
             bossShots.Update(dt, ref player);
-            xpOrbs.Update(dt, player.Position, xpSystem, player.XPMagnetMultiplier);
+            Game.XPVacuumRuntime.Update(dt);
+            xpOrbs.Update(dt, player.Position, xpSystem, player.XPMagnetMultiplier * Game.XPVacuumRuntime.Multiplier);
             orbitals.Update(dt, player.Position, enemySpawner.Enemies);
             Game.WeaponPickupSystem.Update(dt, ref player, orbitals);
-            Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (enemy) => { xpOrbs.Spawn(enemy.Position, Raylib.GetRandomValue(1,2)); score += enemy.IsElite ? 25 : 10; }, boss);
+            Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (enemy) => {
+                // Base XP
+                xpOrbs.Spawn(enemy.Position, Raylib.GetRandomValue(1,2));
+                // Chance for large XP from elites
+                if (enemy.IsElite && Raylib.GetRandomValue(0,99) < 18) xpOrbs.Spawn(enemy.Position + new Vector2(10,0), 10, Game.XPOrbType.Large);
+                score += enemy.IsElite ? 25 : 10;
+            }, boss);
             // Apply dynamic bonuses from timed pacts
             if (Game.PactRuntime.EliteChanceBonus > 0f) enemySpawner.SetEliteChanceBonus(Game.PactRuntime.EliteChanceBonus); else enemySpawner.SetEliteChanceBonus(0f);
 
@@ -500,6 +510,13 @@ private static void ResetGame(ref Game.Player player, Game.EnemySpawner spawner,
 
 namespace EchoesGame.Game
 {
+    internal static class XPVacuumRuntime
+    {
+        private static float remaining;
+        public static float Multiplier => remaining>0f ? 2.5f : 1f;
+        public static void Activate(float duration){ remaining = MathF.Max(remaining, duration); }
+        public static void Update(float dt){ if (remaining>0f) remaining -= dt; }
+    }
     internal sealed class OrbitalsSystem
     {
         private bool unlocked;
@@ -1541,7 +1558,8 @@ namespace EchoesGame.Game
             {
                 CurrentXP -= NextLevelXP;
                 Level++;
-                NextLevelXP = (int)(NextLevelXP * 1.20f + 1);
+                float growth = Level >= 20 ? 1.14f : 1.20f;
+                NextLevelXP = (int)(NextLevelXP * growth + 1);
                 PendingChoices++;
                 Infra.Analytics.Log("level_up", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()},{"level", Level}});
             }
@@ -1553,11 +1571,13 @@ namespace EchoesGame.Game
         }
     }
 
+    internal enum XPOrbType { Normal, Large, Epic }
     internal sealed class XPOrb
     {
         public Vector2 Position;
         public bool Active;
         public int Amount;
+        public XPOrbType Type;
         private float pickupRadius = 24f;
 
         public void Update(float dt, Vector2 playerPos)
@@ -1573,7 +1593,8 @@ namespace EchoesGame.Game
         public void Draw()
         {
             if (!Active) return;
-            if (Assets.TryGet("xp_orb.png", out var tex))
+            string texName = Type==XPOrbType.Epic? "xp_orb_epic.png" : (Type==XPOrbType.Large? "xp_orb_large.png" : "xp_orb.png");
+            if (Assets.TryGet(texName, out var tex))
             {
                 float scale = 0.25f; // downscale 128->32
                 var src = new Rectangle(0, 0, tex.Width, tex.Height);
@@ -1583,7 +1604,8 @@ namespace EchoesGame.Game
             }
             else
             {
-                Raylib.DrawCircleV(Position, 8f, Color.Green);
+                Color c = Type==XPOrbType.Epic? new Color(255,80,80,255) : (Type==XPOrbType.Large? new Color(255,180,80,255) : Color.Green);
+                Raylib.DrawCircleV(Position, 8f, c);
             }
         }
 
@@ -1686,7 +1708,7 @@ namespace EchoesGame.Game
             for (int i = 0; i < capacity; i++) pool[i] = new XPOrb();
         }
 
-        public void Spawn(Vector2 pos, int amount)
+        public void Spawn(Vector2 pos, int amount, XPOrbType type = XPOrbType.Normal)
         {
             for (int i = 0; i < pool.Length; i++)
             {
@@ -1696,6 +1718,7 @@ namespace EchoesGame.Game
                     pool[next].Active = true;
                     pool[next].Position = pos;
                     pool[next].Amount = amount;
+                    pool[next].Type = type;
                     return;
                 }
             }
