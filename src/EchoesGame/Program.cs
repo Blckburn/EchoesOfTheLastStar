@@ -176,7 +176,7 @@ internal static class Program
                 if (!e.Alive) continue;
                 // GravityWell pull on enemies
                 Vector2 gf = Game.KeystoneRuntime.GetGravityForce(e.Position);
-                if (gf.LengthSquared() > 0f) e.Position += gf * dt * 0.9f; // stronger pull
+                if (gf.LengthSquared() > 0f) e.Position += gf * dt * 0.45f; // reduced pull
                 if (Raylib.CheckCollisionRecs(new Rectangle(player.Position.X - 10, player.Position.Y - 10, 20, 20), e.GetBounds()))
                 {
                     player.TakeDamage(e.ContactDamage);
@@ -184,7 +184,7 @@ internal static class Program
             }
             // GravityWell pull on player
             Vector2 gfp = Game.KeystoneRuntime.GetGravityForce(player.Position);
-            if (gfp.LengthSquared() > 0f) player.ApplyExternalForce(gfp, dt * 0.70f);
+            if (gfp.LengthSquared() > 0f) player.ApplyExternalForce(gfp, dt * 0.35f);
             if (boss.Alive)
             {
                 if (Raylib.CheckCollisionRecs(new Rectangle(player.Position.X - 10, player.Position.Y - 10, 20, 20), boss.Bounds))
@@ -477,10 +477,10 @@ namespace EchoesGame.Game
             float dist = MathF.Max(1f, toCenter.Length());
             Vector2 dir = toCenter / dist;
             // Stronger, longer falloff: 1/dist with additive bands
-            float strength = 1400f * (1f / dist);
-            if (dist < 700f) strength += 220f;
-            if (dist < 350f) strength += 200f;
-            strength = MathF.Min(1400f, strength);
+            float strength = 700f * (1f / dist);
+            if (dist < 700f) strength += 110f;
+            if (dist < 350f) strength += 100f;
+            strength = MathF.Min(700f, strength);
             return dir * strength;
         }
     }
@@ -544,6 +544,9 @@ namespace EchoesGame.Game
             Vector2 dir = playerPos - Position;
             if (dir.LengthSquared() > 1e-4f) dir = Vector2.Normalize(dir);
             Position += dir * 80f * dt;
+            // Face toward player for rendering
+            float angleDeg = MathF.Atan2(dir.Y, dir.X) * (180f / MathF.PI);
+            facingDeg = angleDeg;
         }
         public void Update(float dt, Vector2 playerPos, EnemyProjectilePool shots)
         {
@@ -562,6 +565,7 @@ namespace EchoesGame.Game
                 }
             }
         }
+        private float facingDeg;
         public void Draw()
         {
             if (!alive) return;
@@ -571,7 +575,7 @@ namespace EchoesGame.Game
                 var src = new Rectangle(0, 0, tex.Width, tex.Height);
                 var dst = new Rectangle(Position.X, Position.Y, tex.Width * 2f, tex.Height * 2f);
                 var origin = new Vector2(tex.Width, tex.Height);
-                Raylib.DrawTexturePro(tex, src, dst, origin, 0, new Color(255, 255, 0, 230));
+                Raylib.DrawTexturePro(tex, src, dst, origin, facingDeg, new Color(255, 255, 0, 230));
             }
             else
             {
@@ -907,7 +911,7 @@ namespace EchoesGame.Game
             if (HP < 0f) HP = 0f;
             damageIFrames = 0.4f; // minimal tick between damage
             // Player hit feedback
-            Game.FloatingTextSystem.Spawn(Position, $"-{dmg:0}", Color.Red);
+            Game.FloatingTextSystem.Spawn(Position, $"{dmg:0}", Color.Red);
         }
         public void ApplyExternalForce(Vector2 force, float scale)
         {
@@ -1688,7 +1692,7 @@ namespace EchoesGame.Game
                             dmg *= 0.85f; // -15% damage taken
                         }
                         e.TakeDamage(dmg);
-                        Game.FloatingTextSystem.Spawn(e.Position, $"{p.Damage:0}", Color.Yellow);
+                        Game.FloatingTextSystem.Spawn(e.Position, $"{dmg:0}", Color.Yellow);
                         p.Active = false;
                         if (!e.Alive)
                         {
