@@ -550,6 +550,7 @@ namespace EchoesGame.Game
         private float radius = 60f; // дальше от персонажа
         private float speed = 2.0f; // radians/sec
         private float damage = 8f;
+        private float damageMultiplier = 1f;
         private int count = 2;
         private Vector2[] points = new Vector2[8];
         private readonly System.Collections.Generic.Dictionary<Enemy, float> dmgTextCooldown = new();
@@ -558,6 +559,7 @@ namespace EchoesGame.Game
         public void AddRadius(float add){ radius += add; }
         public void AddSpeed(float add){ speed += add; }
         public void AddCount(int add){ count = Math.Min(points.Length, count + add); }
+        public void SetDamageMultiplier(float m){ damageMultiplier = m; }
         public void Update(float dt, Vector2 playerPos, IReadOnlyList<Enemy> enemies)
         {
             if (!unlocked) return;
@@ -580,11 +582,12 @@ namespace EchoesGame.Game
                     var b = new Rectangle(points[k].X-6, points[k].Y-6, 12, 12);
                     if (Raylib.CheckCollisionRecs(b, eb))
                     {
-                        e.TakeDamage(damage);
+                        float dealt = damage * damageMultiplier;
+                        e.TakeDamage(dealt);
                         // spawn yellow number with small per-enemy cooldown to avoid spam
                         if (!dmgTextCooldown.TryGetValue(e, out var cd) || cd <= 0f)
                         {
-                            FloatingTextSystem.Spawn(e.Position, $"{damage:0}", Color.Yellow);
+                            FloatingTextSystem.Spawn(e.Position, $"{dealt:0}", Color.Yellow);
                             dmgTextCooldown[e] = 0.15f;
                         }
                         break;
