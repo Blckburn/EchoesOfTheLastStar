@@ -55,15 +55,19 @@ internal static class Program
         float slowMoTimer = 0f;
         // Reward on boss death: big XP burst + brief slow-mo and score bonus
             boss.OnDeath = (Vector2 pos) => {
-            for (int i = 0; i < 16; i++)
+            float bossXpMult = 1f + bossIndex * 0.6f; // scale XP payout per boss index
+            int smallCount = 16 + (int)(8 * bossIndex);
+            int smallMin = (int)(3 * bossXpMult);
+            int smallMax = (int)(6 * bossXpMult);
+            for (int i = 0; i < smallCount; i++)
             {
                 float ox = Raylib.GetRandomValue(-60, 60);
                 float oy = Raylib.GetRandomValue(-60, 60);
-                xpOrbs.Spawn(new Vector2(pos.X + ox, pos.Y + oy), Raylib.GetRandomValue(3, 6));
+                xpOrbs.Spawn(new Vector2(pos.X + ox, pos.Y + oy), Raylib.GetRandomValue(smallMin, smallMax));
             }
                 // chance to drop large/epic XP crystals (buffed)
-                if (Raylib.GetRandomValue(0,99) < 85) xpOrbs.Spawn(pos + new Vector2(20,0), 20, Game.XPOrbType.Large);
-                if (Raylib.GetRandomValue(0,99) < 80) xpOrbs.Spawn(pos + new Vector2(-20,0), 50, Game.XPOrbType.Epic);
+                if (Raylib.GetRandomValue(0,99) < 85) xpOrbs.Spawn(pos + new Vector2(20,0), (int)(20 * bossXpMult), Game.XPOrbType.Large);
+                if (Raylib.GetRandomValue(0,99) < 80) xpOrbs.Spawn(pos + new Vector2(-20,0), (int)(50 * bossXpMult), Game.XPOrbType.Epic);
                 Game.WeaponPickupSystem.TrySpawnVacuum(pos + new Vector2(0,24));
             score += 250;
             slowMoTimer = 0.6f;
@@ -182,6 +186,7 @@ internal static class Program
             bossShots.Update(dt, ref player);
             Game.XPVacuumRuntime.Update(dt);
             xpOrbs.Update(dt, player.Position, xpSystem, player.XPMagnetMultiplier * Game.XPVacuumRuntime.Multiplier);
+            orbitals.SetDamageMultiplier(player.BulletDamageMultiplier);
             orbitals.Update(dt, player.Position, enemySpawner.Enemies);
             Game.WeaponPickupSystem.Update(dt, ref player, orbitals);
             Game.Collision.Resolve(projectilePool, enemySpawner.Enemies, (enemy) => {
