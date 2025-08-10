@@ -1249,7 +1249,7 @@ namespace EchoesGame.Game
             HP -= dmg;
             hitFlash = 0.1f;
             if (HP <= 0f) Alive = false;
-            Game.FloatingTextSystem.Spawn(Position, $"-{dmg:0}", Color.Orange);
+            // Floating text for enemy damage is handled centrally in Collision.Resolve
         }
     }
 
