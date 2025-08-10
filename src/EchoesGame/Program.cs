@@ -1347,6 +1347,13 @@ namespace EchoesGame.Game
         private float hitFlash;
         public float ContactDamage => IsTank ? 25f : 15f;
         private float faceAngleDeg;
+        // Harpoon elite telegraph/dash state
+        private bool harpoonTelegraphActive;
+        private float harpoonTelegraphTimer;
+        private const float HarpoonTelegraphDuration = 0.45f;
+        private float harpoonCooldown;
+        private Vector2 harpoonFrom;
+        private Vector2 harpoonTo;
 
         public void Update(float dt, Vector2 target)
         {
@@ -1361,6 +1368,40 @@ namespace EchoesGame.Game
                 dir = Vector2.Normalize(dir);
                 Position += dir * Speed * dt;
             }
+            // Harpoon elite behavior: telegraph then dash toward stored target
+            if (IsElite && Modifier == EnemyMod.Harpoon)
+            {
+                if (harpoonCooldown > 0f) harpoonCooldown -= dt;
+                if (!harpoonTelegraphActive && harpoonCooldown <= 0f)
+                {
+                    float dist = Vector2.Distance(Position, target);
+                    if (dist > 80f)
+                    {
+                        harpoonTelegraphActive = true;
+                        harpoonTelegraphTimer = 0f;
+                        harpoonFrom = Position;
+                        harpoonTo = target;
+                    }
+                }
+                if (harpoonTelegraphActive)
+                {
+                    harpoonTelegraphTimer += dt;
+                    if (harpoonTelegraphTimer >= HarpoonTelegraphDuration)
+                    {
+                        // perform dash
+                        Vector2 dashDir = harpoonTo - harpoonFrom;
+                        float d = dashDir.Length();
+                        if (d > 1e-5f)
+                        {
+                            dashDir /= d;
+                            float dashDist = MathF.Min(160f, d);
+                            Position = harpoonFrom + dashDir * dashDist;
+                        }
+                        harpoonTelegraphActive = false;
+                        harpoonCooldown = 2.4f + (Raylib.GetRandomValue(0, 120) / 100f); // ~2.4–3.6s
+                    }
+                }
+            }
             if (hitFlash > 0f) hitFlash -= dt;
         }
 
@@ -1374,12 +1415,18 @@ namespace EchoesGame.Game
                 float scale = IsElite ? 1.25f : 1f;
                 var dst = new Rectangle(Position.X, Position.Y, tex.Width * scale, tex.Height * scale);
                 var origin = new Vector2(tex.Width / 2f, tex.Height / 2f);
-                var tint = hitFlash > 0f ? Color.Orange : (Modifier == EnemyMod.Berserk ? Color.Red : (IsSprinter ? Color.SkyBlue : Color.White));
+                var tint = hitFlash > 0f ? Color.Orange : (Modifier == EnemyMod.Berserk ? Color.Red : (IsSprinter ? Color.SkyBlue : (Modifier==EnemyMod.Harpoon? new Color(255,200,100,255): Color.White)));
                 Raylib.DrawTexturePro(tex, src, dst, origin, faceAngleDeg, tint);
                 if (IsElite && Modifier == EnemyMod.Shielded)
                 {
                     float ringR = MathF.Max(dst.Width, dst.Height) / 2f + 6f;
                     Raylib.DrawCircleLines((int)Position.X, (int)Position.Y, ringR, Color.RayWhite);
+                }
+                if (IsElite && Modifier == EnemyMod.Harpoon)
+                {
+                    // small orange ring to mark harpoon elites
+                    float ringR = MathF.Max(dst.Width, dst.Height) / 2f + 8f;
+                    Raylib.DrawCircleLines((int)Position.X, (int)Position.Y, ringR, new Color(255,180,0,220));
                 }
                 // HP bar
                 float w = 32f; float h = 4f;
@@ -1390,6 +1437,21 @@ namespace EchoesGame.Game
             else
             {
                 Raylib.DrawCircleV(Position, Radius, Color.Maroon);
+            }
+            // Draw harpoon telegraph as elongated rectangle from start to target
+            if (harpoonTelegraphActive)
+            {
+                Vector2 v = harpoonTo - harpoonFrom;
+                float len = v.Length();
+                if (len > 1f)
+                {
+                    float angleDeg = MathF.Atan2(v.Y, v.X) * (180f/MathF.PI);
+                    Vector2 mid = harpoonFrom + v * 0.5f;
+                    var rect = new Rectangle(mid.X, mid.Y, len, 8f);
+                    var originR = new Vector2(len/2f, 4f);
+                    Raylib.DrawRectanglePro(rect, originR, angleDeg, new Color(255, 200, 0, 90));
+                    Raylib.DrawRectangleLinesEx(rect, 1, new Color(255, 220, 0, 180));
+                }
             }
         }
 
