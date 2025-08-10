@@ -62,8 +62,9 @@ internal static class Program
                 xpOrbs.Spawn(new Vector2(pos.X + ox, pos.Y + oy), Raylib.GetRandomValue(3, 6));
             }
                 // small chance to drop large/epic XP crystals
-                if (Raylib.GetRandomValue(0,99) < 50) xpOrbs.Spawn(pos + new Vector2(20,0), 20, Game.XPOrbType.Large);
-                if (Raylib.GetRandomValue(0,99) < 25) xpOrbs.Spawn(pos + new Vector2(-20,0), 50, Game.XPOrbType.Epic);
+                if (Raylib.GetRandomValue(0,99) < 70) xpOrbs.Spawn(pos + new Vector2(20,0), 20, Game.XPOrbType.Large);
+                if (Raylib.GetRandomValue(0,99) < 40) xpOrbs.Spawn(pos + new Vector2(-20,0), 50, Game.XPOrbType.Epic);
+                Game.WeaponPickupSystem.TrySpawnVacuum(pos + new Vector2(0,24));
             score += 250;
             slowMoTimer = 0.6f;
                 Infra.Analytics.Log("boss_kill", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()}});
@@ -188,6 +189,7 @@ internal static class Program
                 xpOrbs.Spawn(enemy.Position, Raylib.GetRandomValue(1,2));
                 // Chance for large XP from elites
                 if (enemy.IsElite && Raylib.GetRandomValue(0,99) < 18) xpOrbs.Spawn(enemy.Position + new Vector2(10,0), 10, Game.XPOrbType.Large);
+                if (enemy.IsElite) Game.WeaponPickupSystem.TrySpawnVacuum(enemy.Position);
                 score += enemy.IsElite ? 25 : 10;
             }, boss);
             // Apply dynamic bonuses from timed pacts
@@ -577,6 +579,7 @@ namespace EchoesGame.Game
     {
         private static bool orbitalDropped = false;
         private static Rectangle? pickup;
+        private static Rectangle? xpVacuumPickup;
         public static void EnsureBossDrop(Vector2 bossPos)
         {
             if (orbitalDropped) return;
@@ -596,6 +599,17 @@ namespace EchoesGame.Game
                     pickup = null;
                 }
             }
+            if (xpVacuumPickup.HasValue)
+            {
+                var r = xpVacuumPickup.Value;
+                var pr = new Rectangle(player.Position.X-14, player.Position.Y-14, 28, 28);
+                if (Raylib.CheckCollisionRecs(r, pr))
+                {
+                    XPVacuumRuntime.Activate(8f);
+                    FloatingTextSystem.Spawn(player.Position, "XP Vacuum!", new Color(120,220,255,255));
+                    xpVacuumPickup = null;
+                }
+            }
         }
         public static void DrawStatic()
         {
@@ -605,8 +619,32 @@ namespace EchoesGame.Game
                 Raylib.DrawRectangleRec(r, new Color(80,160,255,200));
                 Raylib.DrawRectangleLinesEx(r, 2, Color.White);
             }
+            if (xpVacuumPickup.HasValue)
+            {
+                var r = xpVacuumPickup.Value;
+                // diamond (romb)
+                Vector2 c = new Vector2(r.X + r.Width/2, r.Y + r.Height/2);
+                Vector2 up = new Vector2(c.X, c.Y - r.Height/2);
+                Vector2 right = new Vector2(c.X + r.Width/2, c.Y);
+                Vector2 down = new Vector2(c.X, c.Y + r.Height/2);
+                Vector2 left = new Vector2(c.X - r.Width/2, c.Y);
+                Color fill = new Color(120,220,255,220);
+                Raylib.DrawTriangle(up, right, down, fill);
+                Raylib.DrawTriangle(up, left, down, fill);
+                Raylib.DrawLineV(up, right, Color.White);
+                Raylib.DrawLineV(right, down, Color.White);
+                Raylib.DrawLineV(down, left, Color.White);
+                Raylib.DrawLineV(left, up, Color.White);
+            }
         }
-        public static void Reset(){ orbitalDropped=false; pickup=null; }
+        public static void TrySpawnVacuum(Vector2 pos)
+        {
+            if (!xpVacuumPickup.HasValue && Raylib.GetRandomValue(0,99) < 12)
+            {
+                xpVacuumPickup = new Rectangle(pos.X-10, pos.Y-10, 20, 20);
+            }
+        }
+        public static void Reset(){ orbitalDropped=false; pickup=null; xpVacuumPickup=null; }
     }
     internal enum KeystoneType { GravityWell, Darkness }
 
@@ -1593,14 +1631,28 @@ namespace EchoesGame.Game
         public void Draw()
         {
             if (!Active) return;
-            string texName = Type==XPOrbType.Epic? "xp_orb_epic.png" : (Type==XPOrbType.Large? "xp_orb_large.png" : "xp_orb.png");
-            if (Assets.TryGet(texName, out var tex))
+            // Try distinct textures; otherwise tint base
+            Texture2D tex;
+            Color tint = Color.White;
+            if (Type == XPOrbType.Epic)
+            {
+                if (!Assets.TryGet("xp_orb_epic.png", out tex)) { Assets.TryGet("xp_orb.png", out tex); tint = new Color(255,80,80,255); }
+            }
+            else if (Type == XPOrbType.Large)
+            {
+                if (!Assets.TryGet("xp_orb_large.png", out tex)) { Assets.TryGet("xp_orb.png", out tex); tint = new Color(80,160,255,255); }
+            }
+            else
+            {
+                Assets.TryGet("xp_orb.png", out tex);
+            }
+            if (tex.Id != 0)
             {
                 float scale = 0.25f; // downscale 128->32
                 var src = new Rectangle(0, 0, tex.Width, tex.Height);
                 var dst = new Rectangle(Position.X, Position.Y, tex.Width * scale, tex.Height * scale);
                 var origin = new Vector2((tex.Width * scale) / 2f, (tex.Height * scale) / 2f);
-                Raylib.DrawTexturePro(tex, src, dst, origin, 0, Color.White);
+                Raylib.DrawTexturePro(tex, src, dst, origin, 0, tint);
             }
             else
             {
