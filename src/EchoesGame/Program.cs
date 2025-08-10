@@ -1440,6 +1440,7 @@ namespace EchoesGame.Game
                         Position = harpoonTo;
                         harpoonTelegraphActive = false;
                         harpoonCooldown = 2.4f + (Raylib.GetRandomValue(0, 120) / 100f); // ~2.4–3.6s
+                        hitFlash = 0.08f; // brief feedback after dash
                     }
                 }
             }
@@ -1479,7 +1480,7 @@ namespace EchoesGame.Game
             {
                 Raylib.DrawCircleV(Position, Radius, Color.Maroon);
             }
-            // Draw harpoon telegraph as elongated rectangle from start to target
+            // Draw harpoon telegraph as elongated rectangle from start to target (width = enemy diameter)
             if (harpoonTelegraphActive)
             {
                 Vector2 v = harpoonTo - harpoonFrom;
@@ -1488,8 +1489,9 @@ namespace EchoesGame.Game
                 {
                     float angleDeg = MathF.Atan2(v.Y, v.X) * (180f/MathF.PI);
                     Vector2 mid = harpoonFrom + v * 0.5f;
-                    var rect = new Rectangle(mid.X, mid.Y, len, 8f);
-                    var originR = new Vector2(len/2f, 4f);
+                    float thick = Radius * 2f; // match mob diameter
+                    var rect = new Rectangle(mid.X, mid.Y, len, thick);
+                    var originR = new Vector2(len/2f, thick/2f);
                     // single filled rectangle as the telegraph
                     Raylib.DrawRectanglePro(rect, originR, angleDeg, new Color(255, 200, 0, 110));
                 }
@@ -1903,15 +1905,6 @@ namespace EchoesGame.Game
                 if (e.IsElite && e.Modifier == EnemyMod.Berserk && e.HP < e.MaxHP * 0.5f)
                 {
                     e.Speed = spd * 1.5f;
-                }
-                if (e.IsElite && e.Modifier == EnemyMod.Harpoon)
-                {
-                    // occasional short dash toward player
-                    if (Raylib.GetRandomValue(0, 1000) < 6)
-                    {
-                        Vector2 to = target - e.Position; if (to.LengthSquared()>1e-5f) to = Vector2.Normalize(to);
-                        e.Position += to * 140f; // quick snap
-                    }
                 }
                 e.Update(dt, target);
                 e.Speed = spd; // restore base for next frame
