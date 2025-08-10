@@ -154,7 +154,7 @@ internal static class Program
                 if (gameOver)
                 {
                     DrawGameOver();
-                    if (Raylib.IsKeyPressed(KeyboardKey.R)) { ResetGame(ref player, enemySpawner, ref projectilePool, ref xpOrbs, ref xpSystem, ref draftOpen, ref gameOver, ref elapsed, ref score, ref nextPactAt, ref nextBossAt); }
+                    if (Raylib.IsKeyPressed(KeyboardKey.R)) { ResetGame(ref player, enemySpawner, ref projectilePool, ref xpOrbs, ref xpSystem, ref draftOpen, ref gameOver, ref elapsed, ref score, ref nextPactAt, ref nextBossAt, ref boss, ref bossShots); }
                 }
                 Raylib.EndDrawing();
                 continue;
@@ -427,7 +427,7 @@ internal static class Program
         Raylib.DrawText(text, (w - tw)/2, h/2 - size, size, Color.Gold);
     }
 
-    private static void ResetGame(ref Game.Player player, Game.EnemySpawner spawner, ref Game.ProjectilePool proj, ref Game.XPOrbPool xpPool, ref Game.XPSystem xp, ref bool draftOpen, ref bool gameOver, ref float elapsed, ref int score, ref float nextPactAt, ref float nextBossAt)
+    private static void ResetGame(ref Game.Player player, Game.EnemySpawner spawner, ref Game.ProjectilePool proj, ref Game.XPOrbPool xpPool, ref Game.XPSystem xp, ref bool draftOpen, ref bool gameOver, ref float elapsed, ref int score, ref float nextPactAt, ref float nextBossAt, ref Game.BossManager boss, ref Game.EnemyProjectilePool bossShots)
     {
         player = new Game.Player(new Vector2(0,0));
         typeof(Game.EnemySpawner).GetField("enemies", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
@@ -449,6 +449,9 @@ internal static class Program
             .SetValue(spawner, 0f);
         typeof(Game.EnemySpawner).GetField("timer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .SetValue(spawner, 0f);
+        // reset boss
+        boss = new Game.BossManager();
+        bossShots = new Game.EnemyProjectilePool(256);
     }
 
     private static void DrawBar(int x, int y, int width, int height, float normalized, string barBg = "ui_bar_bg.png", string barFg = "ui_bar_fg.png")
@@ -1458,8 +1461,8 @@ namespace EchoesGame.Game
                     Vector2 mid = harpoonFrom + v * 0.5f;
                     var rect = new Rectangle(mid.X, mid.Y, len, 8f);
                     var originR = new Vector2(len/2f, 4f);
-                    Raylib.DrawRectanglePro(rect, originR, angleDeg, new Color(255, 200, 0, 90));
-                    Raylib.DrawRectangleLinesEx(rect, 1, new Color(255, 220, 0, 180));
+                    // single filled rectangle as the telegraph
+                    Raylib.DrawRectanglePro(rect, originR, angleDeg, new Color(255, 200, 0, 110));
                 }
             }
         }
