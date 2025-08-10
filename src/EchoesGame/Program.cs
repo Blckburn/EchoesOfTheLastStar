@@ -565,6 +565,7 @@ namespace EchoesGame.Game
         private float telegraphTimer;
         private const float TelegraphDuration = 0.45f;
         private float telegraphBaseAngleRad;
+        private float fireWatchdogTimer;
         public Action<Vector2>? OnDeath;
         public void SpawnNear(Camera2D camera)
         {
@@ -574,6 +575,7 @@ namespace EchoesGame.Game
             hp = hpMax; alive = true;
             shootTimer = 0f;
             telegraphActive = false; telegraphTimer = 0f; telegraphBaseAngleRad = 0f;
+            fireWatchdogTimer = 0f;
         }
         public void Update(float dt, Vector2 playerPos)
         {
@@ -590,6 +592,7 @@ namespace EchoesGame.Game
         {
             if (!alive) return; Update(dt, playerPos);
             shootTimer += dt;
+            fireWatchdogTimer += dt;
             if (!telegraphActive && shootTimer >= ShootInterval)
             {
                 // start telegraph
@@ -612,7 +615,21 @@ namespace EchoesGame.Game
                         shots.Spawn(Position, v, 8f);
                     }
                     Infra.Analytics.Log("boss_fanshot_fire", new System.Collections.Generic.Dictionary<string, object>{{"t", Raylib.GetTime()}});
+                    fireWatchdogTimer = 0f;
                 }
+            }
+            // Watchdog: if по какой-то причине ни телеграфа, ни выстрела долго нет — принудительный залп
+            if (!telegraphActive && fireWatchdogTimer > ShootInterval * 2.5f)
+            {
+                Vector2 to = playerPos - Position; if (to.LengthSquared() < 1e-4f) to = new Vector2(1, 0); to = Vector2.Normalize(to);
+                float baseAng = MathF.Atan2(to.Y, to.X);
+                for (int i = -2; i <= 2; i++)
+                {
+                    float ang = baseAng + i * 0.11f;
+                    Vector2 v = new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * 320f;
+                    shots.Spawn(Position, v, 8f);
+                }
+                fireWatchdogTimer = 0f; shootTimer = 0f;
             }
         }
         private float facingDeg;
